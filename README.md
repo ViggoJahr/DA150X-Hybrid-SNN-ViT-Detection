@@ -28,6 +28,25 @@ This project is a direct continuation and expansion of previous research conduct
 
 The data, the SNN backbone and data loading utilities in this repository are heavily based on their foundational work. Our novel contribution focuses on substituting the final fully-connected SNN layers with a ViT attention mechanism.
 
+## If we want to have it here for later:
+kth-snn-vit-traffic/
+│
+├── data/                       # Local data (ignored by git)
+│   └── nora_clean_data/        # The new "crisper" data
+│
+├── baseline/                   # Keeping the original model for reference
+│   └── SNN_final_model_v2.py   # Original Olaf et al. architecture
+│
+├── src/                        # Active development
+│   ├── SNN_final_model.py      # Your primary model (updated for new data)
+│   ├── data_loading.py         # Modified to fetch Nora's data
+│   ├── evaluate_model.py       # Metrics and performance testing
+│   └── visualize_data.py       # Result visualization
+│
+├── .gitignore                  # Should ignore /data/ and *.pth files
+├── requirements.txt            # List your dependencies (snnTorch, Norse, etc.)
+└── README.md                   # Updated with the new project scope
+
 ## ⚙️ Data Preprocessing Pipeline
 updated soon with explanations.
 
