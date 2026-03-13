@@ -224,11 +224,11 @@ for layer_nr in nr_par_last_layer_list:
         # if print_image:
         #     save_current_result(output_frame, target_frame, frames, step)
     data_dirs = [
-        "week_32/box_3",
-        "week_33/box_2",
-        "week_34/box_1",
-        "week_35/box_2",
-        "week_36/box_3" ]
+        "week_32-box_3",
+        "week_33-box_2",
+        "week_34-box_1",
+        "week_35-box_2",
+        "week_36-box_3" ]
 
     # [
     #     "w33-1-08-14",
@@ -277,18 +277,17 @@ for layer_nr in nr_par_last_layer_list:
         best_val = 999999
         scaler = GradScaler()
 
-        import glob
         data_files = []
 
         for curr_dir in data_dirs:
-            # Use ** and recursive=True to find .pt files no matter how deep they are nested
-            search_path = os.path.join(training_data_dir, curr_dir, "**", "*.pt")
-            found_files = glob.glob(search_path, recursive=True)
-            data_files.extend(found_files)
 
-        print(f"Found {len(data_files)} training files in {training_data_dir}")
-        if len(data_files) == 0:
-            print("WARNING: No .pt files found! Please verify your data paths.")
+            data_files.extend(
+                [
+                    os.path.join(os.path.join(training_data_dir, curr_dir), f)
+                    for f in os.listdir(os.path.join(training_data_dir, curr_dir))
+                    if f.endswith(".pt")
+                ]
+            )
 
         random.shuffle(data_files)
         for epoch in range(num_epochs):
