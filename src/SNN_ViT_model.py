@@ -556,22 +556,22 @@ def start_training(training_data_dir, output_dir, num_epochs, phase, checkpoint_
 
                             person_loss += (
                                 0.7 * 2
-                                * loss_fn(final_output1, targets[:, 0, step], step, 0)
+                                * loss_fn(final_output1, targets[:, 0, step])
                                 / (sequence_length - overlap)
                             )
                             car_loss += (
                                 0.5 * 2
-                                * loss_fn(final_output2, targets[:, 1, step], step, 2)
+                                * loss_fn(final_output2, targets[:, 1, step])
                                 / (sequence_length - overlap)
                             )
                             buss_loss += (
                                 4 * 6
-                                * loss_fn(final_output3, targets[:, 2, step], step, 5)
+                                * loss_fn(final_output3, targets[:, 2, step])
                                 / (sequence_length - overlap)
                             )
                             truck_loss += (
                                 4.2 * 6
-                                * loss_fn(final_output4, targets[:, 3, step], step, 7)
+                                * loss_fn(final_output4, targets[:, 3, step])
                                 / (sequence_length - overlap)
                             )
 
