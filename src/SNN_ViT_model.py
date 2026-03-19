@@ -306,7 +306,7 @@ data_dirs = [
 # TRAINING FUNCTION
 # =============================================================================
 
-def start_training(training_data_dir, output_dir, num_epochs, phase, checkpoint_path):
+def start_training(training_data_dir, output_dir, num_epochs, phase, checkpoint_path, snn_backbone_path=None):
 
     cur_time = datetime.datetime.now()
     output_dir = os.path.join(
@@ -315,6 +315,20 @@ def start_training(training_data_dir, output_dir, num_epochs, phase, checkpoint_
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = SNNViT().to(device)
+
+    # INJECT PRE-TRAINED SNN BACKBONE
+    if snn_backbone_path and os.path.exists(snn_backbone_path):
+        print(f"Loading pre-trained SNN backbone from: {snn_backbone_path}")
+        old_state_dict = torch.load(snn_backbone_path, map_location=device)
+        
+        # Filter out the FC layers. Keep only conv and batch norm weights
+        pretrained_dict = {k: v for k, v in old_state_dict.items() if 'conv' in k or 'bn' in k}
+        
+        # Overwrite the random conv weights with the pre-trained ones
+        model_dict = model.state_dict()
+        model_dict.update(pretrained_dict)
+        model.load_state_dict(model_dict)
+        print(f"Successfully injected {len(pretrained_dict)} pre-trained SNN layers.")
 
     # Load checkpoint if provided (for phase 2)
     if checkpoint_path:
@@ -326,7 +340,7 @@ def start_training(training_data_dir, output_dir, num_epochs, phase, checkpoint_
     # =========================================================================
     if phase == 1:
         print("=" * 60)
-        print("PHASE 1: Frozen transformer — training adapters only")
+        print("PHASE 1: Frozen transformer AND Frozen SNN — training adapters only")
         print("=" * 60)
 
         # Freeze pre-trained transformer blocks
@@ -334,6 +348,11 @@ def start_training(training_data_dir, output_dir, num_epochs, phase, checkpoint_
             param.requires_grad = False
         for param in model.vit_head.norm.parameters():
             param.requires_grad = False
+        
+        # Freeze the pre-trained SNN backbone
+        for name, param in model.named_parameters():
+            if 'conv' in name or 'bn' in name:
+                param.requires_grad = False
 
         optimizer = torch.optim.AdamW(
             filter(lambda p: p.requires_grad, model.parameters()),
@@ -656,9 +675,11 @@ parser.add_argument("--phase", type=int, default=0, choices=[0, 1, 2],
                          "1=frozen transformer, 2=full fine-tune with dual LR")
 parser.add_argument("--checkpoint", type=str, default=None,
                     help="Path to checkpoint .pth to resume from (for phase 2)")
+parser.add_argument("--snn_backbone", type=str, default=None,
+                    help="Path to pre-trained SNN baseline .pth file")
 
 args = parser.parse_args()
 torch.cuda.set_device(args.gpu)
 
 start_training(args.input_dir, args.output_dir, args.epoch,
-               args.phase, args.checkpoint)
+               args.phase, args.checkpoint, args.snn_backbone)
