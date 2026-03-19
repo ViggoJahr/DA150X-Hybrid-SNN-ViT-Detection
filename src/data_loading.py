@@ -7,7 +7,7 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 import torchvision.transforms.functional as TF
 
-sequence_length, overlap_length, batch_size = 60, 25, 24
+sequence_length, overlap_length, batch_size = 60, 25, 12
 
 
 rand = random.Random(42)
