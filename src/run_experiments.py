@@ -100,28 +100,28 @@ EXPERIMENTS = [
     # -----------------------------------------------------------------
     # EXAMPLE 1: ViT Phase 0, lr=1e-4 (baseline ViT run)
     # -----------------------------------------------------------------
-    {
-        "name": "vit_phase0_lr1e-4",
-        "model": "vit",
-        "phase": 0,
-        "lr": 1e-4,
-        "epochs": 50,
-        "vit_layers": 4,
-        "batch_size": 12,
-    },
+    #{
+    #    "name": "vit_phase0_lr1e-4",
+    #    "model": "vit",
+    #    "phase": 0,
+    #    "lr": 1e-4,
+    #    "epochs": 50,
+    #    "vit_layers": 4,
+    #    "batch_size": 12,
+    #},
 
     # -----------------------------------------------------------------
     # EXAMPLE 2: ViT Phase 0, lr=5e-4 (higher LR comparison)
     # -----------------------------------------------------------------
-    {
-        "name": "vit_phase0_lr5e-4",
-        "model": "vit",
-        "phase": 0,
-        "lr": 5e-4,
-        "epochs": 50,
-        "vit_layers": 4,
-        "batch_size": 12,
-    },
+    #{
+    #    "name": "vit_phase0_lr5e-4",
+    #    "model": "vit",
+    #    "phase": 0,
+    #    "lr": 5e-4,
+    #    "epochs": 50,
+    #    "vit_layers": 4,
+    #    "batch_size": 12,
+    #},
 
     # -----------------------------------------------------------------
     # EXAMPLE 3: ViT with 2 layers (smaller, can use bigger batch)
@@ -176,6 +176,13 @@ EXPERIMENTS = [
     #     "bus_weight": 1.0,
     #     "truck_weight": 1.0,
     # },
+    {
+        "name": "snn_baseline_weights",
+        "model": "snn",
+        "lr": 5e-4,
+        "epochs": 40, # 40 or 50 is fine
+        "batch_size": 12,
+    },
 ]
 
 
