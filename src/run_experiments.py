@@ -45,7 +45,7 @@ import sys
 import time
 import copy
 from pathlib import Path
-import tqdm
+from tqdm import tqdm
 
 # =============================================================================
 # DEFAULT HYPERPARAMETERS
@@ -78,6 +78,7 @@ DEFAULTS = {
     "vit_layers": 4,              # Number of transformer layers (of 12)
     "phase": 0,                   # 0=single LR, 1=frozen, 2=dual LR
     "checkpoint": None,           # Path to checkpoint for resuming
+    "snn_backbone" : None,        # If we have pre-trained weights
 
     # Loss weights
     "person_weight": 1.4,         # 0.7 * 2
@@ -176,12 +177,27 @@ EXPERIMENTS = [
     #     "bus_weight": 1.0,
     #     "truck_weight": 1.0,
     # },
+    # -----------------------------------------------------------------
+    # SNN baseline with baseline values.
+    # -----------------------------------------------------------------
+    #{
+    #   "name": "snn_baseline_weights",
+    #    "model": "snn",
+    #    "lr": 1e-4,
+    #    "epochs": 40, # 40 or 50 is fine
+    #    "batch_size": 24,
+    #},
+    # -----------------------------------------------------------------
+    # ViT phase 1 using result from test above given the baseline values.
+    # -----------------------------------------------------------------
     {
-        "name": "snn_baseline_weights",
-        "model": "snn",
-        "lr": 5e-4,
-        "epochs": 40, # 40 or 50 is fine
+        "name": "vit_phase1_warmup",
+        "model": "vit",
+        "phase": 1,
+        "lr": 1e-4,
+        "epochs": 10,
         "batch_size": 12,
+        "snn_backbone": "../data/processed/experiments/snn_baseline_weights/multiclass-adamw-39-91.4787.pth"
     },
 ]
 
@@ -305,6 +321,7 @@ training_data_dir = "{config["data_dir"]}"
 output_dir = "{config["_output_dir"]}"
 num_epochs = {config["epochs"]}
 checkpoint_path = {repr(config["checkpoint"])}
+snn_backbone_path = {repr(config["snn_backbone"])}
 
 Path(output_dir).mkdir(parents=True, exist_ok=True)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -314,9 +331,21 @@ if checkpoint_path:
     print(f"Loading checkpoint: {{checkpoint_path}}")
     model.load_state_dict(torch.load(checkpoint_path, map_location=device))
 
+if snn_backbone_path and os.path.exists(snn_backbone_path):
+    print(f"Loading pre-trained SNN backbone from: {{snn_backbone_path}}")
+    old_state_dict = torch.load(snn_backbone_path, map_location=device)
+    pretrained_dict = {{k: v for k, v in old_state_dict.items() if 'conv' in k or 'bn' in k}}
+    model_dict = model.state_dict()
+    model_dict.update(pretrained_dict)
+    model.load_state_dict(model_dict)
+    print(f"Successfully injected {{len(pretrained_dict)}} pre-trained SNN layers.")
+
 if PHASE == 1:
     for p in model.vit_head.blocks.parameters(): p.requires_grad = False
     for p in model.vit_head.norm.parameters(): p.requires_grad = False
+    for name, param in model.named_parameters():
+        if 'conv' in name or 'bn' in name:
+            param.requires_grad = False
     optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, weight_decay=w_decay, eps=1e-8)
 elif PHASE == 2:
     pretrained_p, new_p = [], []
