@@ -45,6 +45,7 @@ import sys
 import time
 import copy
 from pathlib import Path
+import tqdm
 
 # =============================================================================
 # DEFAULT HYPERPARAMETERS
@@ -56,8 +57,8 @@ DEFAULTS = {
     "model": "vit",               # "snn" or "vit"
 
     # Paths (relative to where you run from)
-    "data_dir": "data/raw_scaled/",
-    "output_base": "src/data/processed/experiments/",
+    "data_dir": "../data/raw_scaled/",
+    "output_base": "../data/processed/experiments/",
 
     # Training
     "epochs": 50,
@@ -670,14 +671,38 @@ def run_experiments(gpu_id):
         # Run as subprocess
         exp_start = time.time()
         try:
-            print(f"  Running... (log: {log_path})")
+            print(f"  Running... (log: {log_path})")            
+            pbar = tqdm(total=config["epochs"], desc="Training", unit="epoch", leave=False, dynamic_ncols=True)
+
             with open(log_path, 'w') as log_file:
-                proc = subprocess.run(
+                # Use Popen to read output in real-time
+                proc = subprocess.Popen(
                     [sys.executable, script_path],
-                    stdout=log_file,
+                    stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
-                    timeout=None,  # No timeout — let it run
+                    text=True,
+                    bufsize=1  # Line buffered
                 )
+                
+                # Listen to the script's output as it runs
+                for line in proc.stdout:
+                    # 1. Write everything to the log file silently
+                    log_file.write(line)
+                    log_file.flush()
+                    
+                    # 2. Update the progress bar when an Epoch finishes
+                    if line.startswith("Epoch "):
+                        pbar.update(1)
+                        # Bonus: Extract the validation loss and stick it on the progress bar!
+                        try:
+                            val_str = [p for p in line.split("|") if "val:" in p][0]
+                            val_loss = val_str.split(":")[1].strip()
+                            pbar.set_postfix(val_loss=val_loss)
+                        except Exception:
+                            pass
+                
+                proc.wait()
+                pbar.close()
 
             exp_time = time.time() - exp_start
             success = proc.returncode == 0
