@@ -91,7 +91,7 @@ class ViTHeatmapHead(nn.Module):
         embed_dim = vit.embed_dim  # 192
 
         # KEEP: pre-trained transformer blocks + final norm
-        self.blocks = vit.blocks[:4]   # 12 transformer encoder layers
+        self.blocks = vit.blocks[:4]   # 12 transformer encoder layers SKA DET INTE VARA 4 BARA?
         self.norm = vit.norm       # LayerNorm
 
         # CUSTOM: patch embedding (8 spike channels → 192 dim)
@@ -272,7 +272,7 @@ def save_data(model, output_dir, train_loss, validation_loss, val_accuracy,
     print(f"Stats saved to \x1b[1m{file_name}.json\x1b[22m")
 
 
-def loss_fn(output_frame, target_frame, step, class_id):
+def loss_fn(output_frame, target_frame):
     return loss_function(output_frame, target_frame * 1000)
 
 
@@ -473,22 +473,22 @@ def start_training(training_data_dir, output_dir, num_epochs, phase, checkpoint_
 
                             person_loss += (
                                 0.7 * 2
-                                * loss_fn(final_output1, targets[:, 0, step], step, 0)
+                                * loss_fn(final_output1, targets[:, 0, step])
                                 / (sequence_length - overlap)
                             )
                             car_loss += (
                                 0.5 * 2
-                                * loss_fn(final_output2, targets[:, 1, step], step, 2)
+                                * loss_fn(final_output2, targets[:, 1, step])
                                 / (sequence_length - overlap)
                             )
                             buss_loss += (
                                 4 * 6
-                                * loss_fn(final_output3, targets[:, 2, step], step, 5)
+                                * loss_fn(final_output3, targets[:, 2, step])
                                 / (sequence_length - overlap)
                             )
                             truck_loss += (
                                 4.2 * 6
-                                * loss_fn(final_output4, targets[:, 3, step], step, 7)
+                                * loss_fn(final_output4, targets[:, 3, step])
                                 / (sequence_length - overlap)
                             )
 
