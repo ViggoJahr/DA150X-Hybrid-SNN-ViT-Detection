@@ -179,42 +179,6 @@ class ViTHeatmapHead(nn.Module):
         x = self.decoder(x)
         return x
 
-    def forward(self, spk3):
-        """
-        Args:
-            spk3: [batch, 8, 20, 20] spike tensor from conv backbone
-
-        Returns:
-            heatmaps: [batch, 4, 64, 64] predicted heatmaps
-                      channel 0=person, 1=car, 2=bus, 3=truck
-        """
-        B, C, H, W = spk3.shape
-
-        # Flatten spatial positions into a sequence of patches
-        # [B, 8, 20, 20] → [B, 400, 8]
-        x = spk3.flatten(2).transpose(1, 2)
-
-        # Project to transformer dimension + add positional info
-        # [B, 400, 8] → [B, 400, 192]
-        x = self.patch_embed(x) + self.pos_embed
-
-        # Run through pre-trained transformer blocks
-        # [B, 400, 192] → [B, 400, 192]
-        x = self.blocks(x)
-        x = self.norm(x)
-
-        # Project down and reshape back to spatial grid
-        # [B, 400, 192] → [B, 400, 64] → [B, 64, 20, 20]
-        x = self.to_spatial(x)
-        x = x.transpose(1, 2).reshape(B, 64, self.grid_size, self.grid_size)
-
-        # Upsample to output resolution
-        # [B, 64, 20, 20] → [B, 4, 64, 64]
-        x = self.decoder(x)
-
-        return x
-
-
 # =============================================================================
 # HYBRID SNN + ViT MODEL
 # =============================================================================
@@ -234,8 +198,8 @@ class SNNViT(nn.Module):
     Compare to original SNN with FC heads: ~15.5M params
     """
 
-    def __init__(self):
-        super(SNNViT, self, model_version='v2.2').__init__()
+    def __init__(self, model_version='v2.2'):
+        super(SNNViT, self).__init__()
         self.model_version = model_version
 
         # --- SNN Conv Backbone (unchanged from SNN_final_model.py) ---
