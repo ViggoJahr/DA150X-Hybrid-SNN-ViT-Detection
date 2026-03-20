@@ -267,7 +267,7 @@ def evaluate(args):
     print(f"Checkpoint: {checkpoint_path}")
 
     # ── Load model ──
-    model = SNN()
+    model = SNNViT()
     model.load_state_dict(torch.load(checkpoint_path, map_location=device, weights_only=True))
     model = model.to(device)
     model.eval()
@@ -340,12 +340,9 @@ def evaluate(args):
             targets_cropped.append(resized.squeeze(1))  # [5400, 64, 64]
 
         # Process in sequences (same way training does)
-        mem_states = (None, None, None) # Bara 3 states för ViT!
-        with torch.no_grad():
-            with torch.amp.autocast(device_type="cuda" if "cuda" in str(device) else "cpu"):
-                pred_person, pred_car, pred_bus, pred_truck, mem_states = model(frame, mem_states)
-                seq_start = 0
-                frame_count = 0
+        mem_states = (None, None, None) # Only 3 states for ViT!
+        seq_start = 0
+        frame_count = 0
 
         while seq_start + sequence_length <= n_frames:
             # Get sequence of frames
