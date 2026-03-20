@@ -678,8 +678,9 @@ parser.add_argument("--checkpoint", type=str, default=None,
 parser.add_argument("--snn_backbone", type=str, default=None,
                     help="Path to pre-trained SNN baseline .pth file")
 
-args = parser.parse_args()
-torch.cuda.set_device(args.gpu)
+if __name__ == "__main__":
+    args = parser.parse_args()
+    torch.cuda.set_device(args.gpu)
 
-start_training(args.input_dir, args.output_dir, args.epoch,
+    start_training(args.input_dir, args.output_dir, args.epoch,
                args.phase, args.checkpoint, args.snn_backbone)
