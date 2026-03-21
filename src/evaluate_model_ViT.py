@@ -51,7 +51,7 @@ from norse.torch import LILinearCell
 from norse.torch.module.lif import LIFCell, LIFParameters
 
 
-from SNN_ViT_model_2 import SNNViT
+from SNN_ViT_model_v2 import SNNViT
 
 # Try importing scipy for peak detection; fallback to simple version if missing
 try:
