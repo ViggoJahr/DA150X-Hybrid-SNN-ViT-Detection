@@ -51,7 +51,7 @@ from norse.torch import LILinearCell
 from norse.torch.module.lif import LIFCell, LIFParameters
 
 
-from SNN_ViT_model import SNNViT
+from SNN_ViT_model_2 import SNNViT
 
 # Try importing scipy for peak detection; fallback to simple version if missing
 try:
@@ -267,7 +267,7 @@ def evaluate(args):
     print(f"Checkpoint: {checkpoint_path}")
 
     # ── Load model ──
-    model = SNNViT()
+    model = SNNViT(model_version=args.version) # CHANGE TO NOT HAVE MODEL_VERSION IF WE RUN version 1.
     model.load_state_dict(torch.load(checkpoint_path, map_location=device, weights_only=True))
     model = model.to(device)
     model.eval()
@@ -504,6 +504,9 @@ def main():
                         help="Save an image every N frames (default: 200)")
     parser.add_argument("--save_video", action="store_true",
                         help="Save a video of predictions (requires ffmpeg)")
+    parser.add_argument("--version", type=str, default="v2.2", choices=["v1", "v2.1", "v2.2"],
+                    help="Architecture version: v1=Original, v2.1=MSPE+Diet, v2.2=MSPE+Diet+FPN")
+
 
     args = parser.parse_args()
     torch.cuda.set_device(args.gpu)
