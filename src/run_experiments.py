@@ -99,108 +99,96 @@ DEFAULTS = {
 
 EXPERIMENTS = [
     # -----------------------------------------------------------------
-    # EXAMPLE 1: ViT Phase 0, lr=1e-4 (baseline ViT run)
-    # -----------------------------------------------------------------
-    #{
-    #    "name": "vit_phase0_lr1e-4",
-    #    "model": "vit",
-    #    "phase": 0,
-    #    "lr": 1e-4,
-    #    "epochs": 50,
-    #    "vit_layers": 4,
-    #    "batch_size": 12,
-    #},
-
-    # -----------------------------------------------------------------
-    # EXAMPLE 2: ViT Phase 0, lr=5e-4 (higher LR comparison)
-    # -----------------------------------------------------------------
-    #{
-    #    "name": "vit_phase0_lr5e-4",
-    #    "model": "vit",
-    #    "phase": 0,
-    #    "lr": 5e-4,
-    #    "epochs": 50,
-    #    "vit_layers": 4,
-    #    "batch_size": 12,
-    #},
-
-    # -----------------------------------------------------------------
-    # EXAMPLE 3: ViT with 2 layers (smaller, can use bigger batch)
+    # SNN Baseline: Train the SNN backbone from scratch to get weights.
+    # (Already completed - Best val loss: 91.48)
     # -----------------------------------------------------------------
     # {
-    #     "name": "vit_2layers_lr1e-4",
-    #     "model": "vit",
-    #     "phase": 0,
-    #     "lr": 1e-4,
-    #     "epochs": 50,
-    #     "vit_layers": 2,
-    #     "batch_size": 16,
-    # },
-
-    # -----------------------------------------------------------------
-    # EXAMPLE 4: SNN baseline with lower dropout
-    # -----------------------------------------------------------------
-    # {
-    #     "name": "snn_dropout02",
+    #     "name": "snn_baseline_weights",
     #     "model": "snn",
-    #     "lr": 5e-4,
-    #     "epochs": 50,
-    #     "dropout1": 0.2,
-    #     "dropout2": 0.2,
+    #     "lr": 1e-4,
+    #     "epochs": 40,
     #     "batch_size": 24,
     # },
 
     # -----------------------------------------------------------------
-    # EXAMPLE 5: ViT Phase 2 from checkpoint
+    # ViT Phase 1: Warmup adapters using the SNN baseline weights.
+    # (Already completed - Best val loss: 121.75)
     # -----------------------------------------------------------------
     # {
-    #     "name": "vit_phase2_from_p1",
+    #     "name": "vit_phase1_warmup",
+    #     "model": "vit",
+    #     "phase": 1,
+    #     "lr": 1e-4,
+    #     "epochs": 15,
+    #     "batch_size": 12,
+    #     "snn_backbone": "../data/processed/experiments/snn_baseline_weights/multiclass-adamw-39-91.4787.pth"
+    # },
+
+    # -----------------------------------------------------------------
+    # ViT Phase 2 (Standard): Full fine-tuning with baseline values.
+    # (Already completed - Best val loss: ~94)
+    # -----------------------------------------------------------------
+    # {
+    #     "name": "vit_phase2_finetune",
     #     "model": "vit",
     #     "phase": 2,
     #     "lr": 1e-4,
-    #     "lr_pretrained": 1e-5,
-    #     "epochs": 100,
-    #     "checkpoint": "src/data/processed/vit/vit-3-13-18-24/multiclass-adamw-8-134.6753.pth",
+    #     "lr_pretrained": 1e-5, 
+    #     "epochs": 40,          
+    #     "batch_size": 12,
+    #     "checkpoint": "../data/processed/experiments/vit_phase1_warmup/multiclass-adamw-14-121.7497.pth"
     # },
 
     # -----------------------------------------------------------------
-    # EXAMPLE 6: ViT with equal class weights (no bus/truck boost)
-    # -----------------------------------------------------------------
-    # {
-    #     "name": "vit_equal_weights",
-    #     "model": "vit",
-    #     "phase": 0,
-    #     "lr": 1e-4,
-    #     "epochs": 50,
-    #     "person_weight": 1.0,
-    #     "car_weight": 1.0,
-    #     "bus_weight": 1.0,
-    #     "truck_weight": 1.0,
-    # },
-    # -----------------------------------------------------------------
-    # SNN baseline with baseline values.
-    # -----------------------------------------------------------------
-    #{
-    #   "name": "snn_baseline_weights",
-    #    "model": "snn",
-    #    "lr": 1e-4,
-    #    "epochs": 40, # 40 or 50 is fine
-    #    "batch_size": 24,
-    #},
-    # -----------------------------------------------------------------
-    # ViT phase 1 using result from test above given the baseline values.
+    # EXPERIMENT A: ViT Phase 2 with EQUAL Learning Rates.
+    # Testing if the pre-trained ViT layers need a higher LR (1e-4) to adapt.
     # -----------------------------------------------------------------
     {
-        "name": "vit_phase1_warmup",
+        "name": "vit_phase2_equal_lr",
         "model": "vit",
-        "phase": 1,
+        "phase": 2,
         "lr": 1e-4,
-        "epochs": 10,
+        "lr_pretrained": 1e-4,  # Höjd från 1e-5
+        "epochs": 40,
         "batch_size": 12,
-        "snn_backbone": "../data/processed/experiments/snn_baseline_weights/multiclass-adamw-39-91.4787.pth"
+        "checkpoint": "../data/processed/experiments/vit_phase1_warmup/multiclass-adamw-14-121.7497.pth"
     },
-]
 
+    # -----------------------------------------------------------------
+    # EXPERIMENT B: ViT Phase 2 with MORE Transformer Layers (6 layers).
+    # Testing if a deeper ViT head captures better global context.
+    # -----------------------------------------------------------------
+    {
+        "name": "vit_phase2_6_layers",
+        "model": "vit",
+        "phase": 2,
+        "vit_layers": 6,        # Höjd från 4 till 6
+        "lr": 1e-4,
+        "lr_pretrained": 1e-5,
+        "epochs": 40,
+        "batch_size": 12,
+        "checkpoint": "../data/processed/experiments/vit_phase1_warmup/multiclass-adamw-14-121.7497.pth"
+    },
+
+    # -----------------------------------------------------------------
+    # EXPERIMENT C: ViT Phase 2 with SOFTER Class Weights.
+    # Testing if massive penalties on buses/trucks disrupt ViT attention.
+    # -----------------------------------------------------------------
+    {
+        "name": "vit_phase2_softer_weights",
+        "model": "vit",
+        "phase": 2,
+        "lr": 1e-4,
+        "lr_pretrained": 1e-5,
+        "epochs": 40,
+        "batch_size": 12,
+        "person_weight": 2.0,   # Justerad
+        "car_weight": 1.0,      # Justerad
+        "bus_weight": 10.0,     # Sänkt från 24.0
+        "truck_weight": 10.0,   # Sänkt från 25.2
+        "checkpoint": "../data/processed/experiments/vit_phase1_warmup/multiclass-adamw-14-121.7497.pth"
+    }
+]
 
 # =============================================================================
 # SCRIPT GENERATOR
