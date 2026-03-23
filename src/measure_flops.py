@@ -38,7 +38,7 @@ class ViT_Profiler_Wrapper_v1(nn.Module):
 class ViT_Profiler_Wrapper_v2_1(nn.Module):
     def __init__(self):
         super().__init__()
-        self.model = SNNViT_v2(model_version='v.2.1')
+        self.model = SNNViT_v2(model_version='v2.1')
 
     def forward(self, x):
         # Initialize 3 empty memory states for the ViT hybrid
@@ -48,7 +48,7 @@ class ViT_Profiler_Wrapper_v2_1(nn.Module):
 class ViT_Profiler_Wrapper_v2_2(nn.Module):
     def __init__(self):
         super().__init__()
-        self.model = SNNViT_v2(model_version='v.2.2')
+        self.model = SNNViT_v2(model_version='v2.2')
 
     def forward(self, x):
         # Initialize 3 empty memory states for the ViT hybrid
