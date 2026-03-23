@@ -38,6 +38,7 @@ import matplotlib.pyplot as plt
 from data_loading import get_data
 from norse.torch import LILinearCell
 from norse.torch.module.lif import LIFCell, LIFParameters
+import torch.nn.functional as F
 import numpy as np
 import gc
 import json
