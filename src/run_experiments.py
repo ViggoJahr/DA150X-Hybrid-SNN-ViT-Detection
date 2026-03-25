@@ -45,6 +45,7 @@ import sys
 import time
 import copy
 from pathlib import Path
+from tqdm import tqdm
 
 # =============================================================================
 # DEFAULT HYPERPARAMETERS
@@ -56,8 +57,8 @@ DEFAULTS = {
     "model": "vit",               # "snn" or "vit"
 
     # Paths (relative to where you run from)
-    "data_dir": "data/raw_scaled/",
-    "output_base": "src/data/processed/experiments/",
+    "data_dir": "../data/raw_scaled/",
+    "output_base": "../data/processed/experiments/",
 
     # Training
     "epochs": 50,
@@ -77,6 +78,7 @@ DEFAULTS = {
     "vit_layers": 4,              # Number of transformer layers (of 12)
     "phase": 0,                   # 0=single LR, 1=frozen, 2=dual LR
     "checkpoint": None,           # Path to checkpoint for resuming
+    "snn_backbone" : None,        # If we have pre-trained weights
 
     # Loss weights
     "person_weight": 1.4,         # 0.7 * 2
@@ -97,86 +99,96 @@ DEFAULTS = {
 
 EXPERIMENTS = [
     # -----------------------------------------------------------------
-    # EXAMPLE 1: ViT Phase 0, lr=1e-4 (baseline ViT run)
-    # -----------------------------------------------------------------
-    {
-        "name": "vit_phase0_lr1e-4",
-        "model": "vit",
-        "phase": 0,
-        "lr": 1e-4,
-        "epochs": 50,
-        "vit_layers": 4,
-        "batch_size": 12,
-    },
-
-    # -----------------------------------------------------------------
-    # EXAMPLE 2: ViT Phase 0, lr=5e-4 (higher LR comparison)
-    # -----------------------------------------------------------------
-    {
-        "name": "vit_phase0_lr5e-4",
-        "model": "vit",
-        "phase": 0,
-        "lr": 5e-4,
-        "epochs": 50,
-        "vit_layers": 4,
-        "batch_size": 12,
-    },
-
-    # -----------------------------------------------------------------
-    # EXAMPLE 3: ViT with 2 layers (smaller, can use bigger batch)
+    # SNN Baseline: Train the SNN backbone from scratch to get weights.
+    # (Already completed - Best val loss: 91.48)
     # -----------------------------------------------------------------
     # {
-    #     "name": "vit_2layers_lr1e-4",
-    #     "model": "vit",
-    #     "phase": 0,
-    #     "lr": 1e-4,
-    #     "epochs": 50,
-    #     "vit_layers": 2,
-    #     "batch_size": 16,
-    # },
-
-    # -----------------------------------------------------------------
-    # EXAMPLE 4: SNN baseline with lower dropout
-    # -----------------------------------------------------------------
-    # {
-    #     "name": "snn_dropout02",
+    #     "name": "snn_baseline_weights",
     #     "model": "snn",
-    #     "lr": 5e-4,
-    #     "epochs": 50,
-    #     "dropout1": 0.2,
-    #     "dropout2": 0.2,
+    #     "lr": 1e-4,
+    #     "epochs": 40,
     #     "batch_size": 24,
     # },
 
     # -----------------------------------------------------------------
-    # EXAMPLE 5: ViT Phase 2 from checkpoint
+    # ViT Phase 1: Warmup adapters using the SNN baseline weights.
+    # (Already completed - Best val loss: 121.75)
     # -----------------------------------------------------------------
     # {
-    #     "name": "vit_phase2_from_p1",
+    #     "name": "vit_phase1_warmup",
+    #     "model": "vit",
+    #     "phase": 1,
+    #     "lr": 1e-4,
+    #     "epochs": 15,
+    #     "batch_size": 12,
+    #     "snn_backbone": "../data/processed/experiments/snn_baseline_weights/multiclass-adamw-39-91.4787.pth"
+    # },
+
+    # -----------------------------------------------------------------
+    # ViT Phase 2 (Standard): Full fine-tuning with baseline values.
+    # (Already completed - Best val loss: ~94)
+    # -----------------------------------------------------------------
+    # {
+    #     "name": "vit_phase2_finetune",
     #     "model": "vit",
     #     "phase": 2,
     #     "lr": 1e-4,
-    #     "lr_pretrained": 1e-5,
-    #     "epochs": 100,
-    #     "checkpoint": "src/data/processed/vit/vit-3-13-18-24/multiclass-adamw-8-134.6753.pth",
+    #     "lr_pretrained": 1e-5, 
+    #     "epochs": 40,          
+    #     "batch_size": 12,
+    #     "checkpoint": "../data/processed/experiments/vit_phase1_warmup/multiclass-adamw-14-121.7497.pth"
     # },
 
     # -----------------------------------------------------------------
-    # EXAMPLE 6: ViT with equal class weights (no bus/truck boost)
+    # EXPERIMENT A: ViT Phase 2 with EQUAL Learning Rates.
+    # Testing if the pre-trained ViT layers need a higher LR (1e-4) to adapt.
     # -----------------------------------------------------------------
-    # {
-    #     "name": "vit_equal_weights",
-    #     "model": "vit",
-    #     "phase": 0,
-    #     "lr": 1e-4,
-    #     "epochs": 50,
-    #     "person_weight": 1.0,
-    #     "car_weight": 1.0,
-    #     "bus_weight": 1.0,
-    #     "truck_weight": 1.0,
-    # },
+    {
+        "name": "vit_phase2_equal_lr",
+        "model": "vit",
+        "phase": 2,
+        "lr": 1e-4,
+        "lr_pretrained": 1e-4,  # Höjd från 1e-5
+        "epochs": 40,
+        "batch_size": 12,
+        "checkpoint": "../data/processed/experiments/vit_phase1_warmup/multiclass-adamw-14-121.7497.pth"
+    },
+
+    # -----------------------------------------------------------------
+    # EXPERIMENT B: ViT Phase 2 with MORE Transformer Layers (6 layers).
+    # Testing if a deeper ViT head captures better global context.
+    # -----------------------------------------------------------------
+    {
+        "name": "vit_phase2_6_layers",
+        "model": "vit",
+        "phase": 2,
+        "vit_layers": 6,        # Höjd från 4 till 6
+        "lr": 1e-4,
+        "lr_pretrained": 1e-5,
+        "epochs": 40,
+        "batch_size": 12,
+        "checkpoint": "../data/processed/experiments/vit_phase1_warmup/multiclass-adamw-14-121.7497.pth"
+    },
+
+    # -----------------------------------------------------------------
+    # EXPERIMENT C: ViT Phase 2 with SOFTER Class Weights.
+    # Testing if massive penalties on buses/trucks disrupt ViT attention.
+    # -----------------------------------------------------------------
+    {
+        "name": "vit_phase2_softer_weights",
+        "model": "vit",
+        "phase": 2,
+        "lr": 1e-4,
+        "lr_pretrained": 1e-5,
+        "epochs": 40,
+        "batch_size": 12,
+        "person_weight": 2.0,   # Justerad
+        "car_weight": 1.0,      # Justerad
+        "bus_weight": 10.0,     # Sänkt från 24.0
+        "truck_weight": 10.0,   # Sänkt från 25.2
+        "checkpoint": "../data/processed/experiments/vit_phase1_warmup/multiclass-adamw-14-121.7497.pth"
+    }
 ]
-
 
 # =============================================================================
 # SCRIPT GENERATOR
@@ -297,6 +309,7 @@ training_data_dir = "{config["data_dir"]}"
 output_dir = "{config["_output_dir"]}"
 num_epochs = {config["epochs"]}
 checkpoint_path = {repr(config["checkpoint"])}
+snn_backbone_path = {repr(config["snn_backbone"])}
 
 Path(output_dir).mkdir(parents=True, exist_ok=True)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -306,9 +319,21 @@ if checkpoint_path:
     print(f"Loading checkpoint: {{checkpoint_path}}")
     model.load_state_dict(torch.load(checkpoint_path, map_location=device))
 
+if snn_backbone_path and os.path.exists(snn_backbone_path):
+    print(f"Loading pre-trained SNN backbone from: {{snn_backbone_path}}")
+    old_state_dict = torch.load(snn_backbone_path, map_location=device)
+    pretrained_dict = {{k: v for k, v in old_state_dict.items() if 'conv' in k or 'bn' in k}}
+    model_dict = model.state_dict()
+    model_dict.update(pretrained_dict)
+    model.load_state_dict(model_dict)
+    print(f"Successfully injected {{len(pretrained_dict)}} pre-trained SNN layers.")
+
 if PHASE == 1:
     for p in model.vit_head.blocks.parameters(): p.requires_grad = False
     for p in model.vit_head.norm.parameters(): p.requires_grad = False
+    for name, param in model.named_parameters():
+        if 'conv' in name or 'bn' in name:
+            param.requires_grad = False
     optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, weight_decay=w_decay, eps=1e-8)
 elif PHASE == 2:
     pretrained_p, new_p = [], []
@@ -670,14 +695,38 @@ def run_experiments(gpu_id):
         # Run as subprocess
         exp_start = time.time()
         try:
-            print(f"  Running... (log: {log_path})")
+            print(f"  Running... (log: {log_path})")            
+            pbar = tqdm(total=config["epochs"], desc="Training", unit="epoch", leave=False, dynamic_ncols=True)
+
             with open(log_path, 'w') as log_file:
-                proc = subprocess.run(
+                # Use Popen to read output in real-time
+                proc = subprocess.Popen(
                     [sys.executable, script_path],
-                    stdout=log_file,
+                    stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
-                    timeout=None,  # No timeout — let it run
+                    text=True,
+                    bufsize=1  # Line buffered
                 )
+                
+                # Listen to the script's output as it runs
+                for line in proc.stdout:
+                    # 1. Write everything to the log file silently
+                    log_file.write(line)
+                    log_file.flush()
+                    
+                    # 2. Update the progress bar when an Epoch finishes
+                    if line.startswith("Epoch "):
+                        pbar.update(1)
+                        # Bonus: Extract the validation loss and stick it on the progress bar!
+                        try:
+                            val_str = [p for p in line.split("|") if "val:" in p][0]
+                            val_loss = val_str.split(":")[1].strip()
+                            pbar.set_postfix(val_loss=val_loss)
+                        except Exception:
+                            pass
+                
+                proc.wait()
+                pbar.close()
 
             exp_time = time.time() - exp_start
             success = proc.returncode == 0

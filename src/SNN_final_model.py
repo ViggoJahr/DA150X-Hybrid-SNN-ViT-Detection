@@ -604,10 +604,9 @@ parser.add_argument(
     default=2,
     help="The CUDA device ID to use (default: %(default)s)",
 )
+if __name__ == "__main__":
+    args = parser.parse_args()
 
-args = parser.parse_args()
+    torch.cuda.set_device(args.gpu)
 
-# SET CUDA DEVICE HERE
-torch.cuda.set_device(args.gpu)
-
-start_training(args.input_dir, args.output_dir, args.epoch)
+    start_training(args.input_dir, args.output_dir, args.epoch)

@@ -38,6 +38,7 @@ import matplotlib.pyplot as plt
 from data_loading import get_data
 from norse.torch import LILinearCell
 from norse.torch.module.lif import LIFCell, LIFParameters
+import torch.nn.functional as F
 import numpy as np
 import gc
 import json
@@ -59,111 +60,125 @@ lr_pretrained = 1e-5  # Lower LR for pre-trained transformer blocks
 loss_function = nn.MSELoss()
 tau_mem = 180
 
+
+
 # =============================================================================
 # ViT HEATMAP HEAD
 # =============================================================================
 
+class MultiScalePatchEmbed(nn.Module):
+    """
+    Multi-Scale Patch Embedding (MSPE) module.
+    Replaces the standard linear projection with three parallel convolutions
+    (1x1, 3x3, 5x5) to capture both fine details and larger structures before
+    the Transformer processes the patches.
+    """
+    def __init__(self, in_channels=8, embed_dim=192):
+        super().__init__()
+        # Divide the embedding dimension evenly across three scales
+        out_dim = embed_dim // 3 
+        
+        # Three parallel convolutional "magnifying glasses"
+        self.conv_small = nn.Conv2d(in_channels, out_dim, kernel_size=1, padding=0)
+        self.conv_mid   = nn.Conv2d(in_channels, out_dim, kernel_size=3, padding=1)
+        self.conv_large = nn.Conv2d(in_channels, out_dim, kernel_size=5, padding=2)
+
+    def forward(self, x):
+        # Input 'x' is spk3 from SNN: [Batch, 8, 20, 20]
+        x_small = self.conv_small(x)
+        x_mid = self.conv_mid(x)
+        x_large = self.conv_large(x)
+        
+        # Concatenate along the channel dimension -> [B, 192, 20, 20]
+        x_multi = torch.cat([x_small, x_mid, x_large], dim=1) 
+        
+        # Flatten for the Transformer: [B, 192, 20, 20] -> [B, 400, 192]
+        x_flat = x_multi.flatten(2).transpose(1, 2)
+        return x_flat
+
 class ViTHeatmapHead(nn.Module):
     """
-    Vision Transformer head that replaces the FC classification branches.
-
-    Takes the SNN conv backbone output spk3 [batch, 8, 20, 20] and produces
-    4-class heatmaps [batch, 4, 64, 64].
-
-    Uses pre-trained ViT-Tiny transformer blocks (12 layers, 192 dim, 3 heads)
-    from timm. The patch embedding and output decoder are custom.
-
-    Pre-trained blocks: ~5.5M params (from ImageNet)
-    Custom layers: ~150K params (trained from scratch)
-    Total: ~5.7M params
-
-    Compare to FC heads: ~15.5M params
+    Vision Transformer head that decodes SNN spiking features into heatmaps.
+    Supports ablation versions:
+      - v1: Standard ViT (4 layers, linear patch embed)
+      - v2.1: Diet-ViT (2 layers) + MSPE
+      - v2.2: Diet-ViT (2 layers) + MSPE + FPN-light (Skip connection from spk2)
     """
-
-    def __init__(self, in_channels=8, grid_size=20,
-                 num_classes=4, output_size=64):
+    def __init__(self, in_channels=8, grid_size=20, num_classes=4, output_size=64, model_version='v2.2'):
         super().__init__()
         self.grid_size = grid_size
         self.num_classes = num_classes
+        self.model_version = model_version
 
-        # --- Load pre-trained ViT-Tiny ---
         vit = timm.create_model('vit_tiny_patch16_224', pretrained=True)
         embed_dim = vit.embed_dim  # 192
 
-        # KEEP: pre-trained transformer blocks + final norm
-        self.blocks = vit.blocks[:4]   # 12 transformer encoder layers SKA DET INTE VARA 4 BARA?
-        self.norm = vit.norm       # LayerNorm
+        # Use 'Diet-ViT' (2 layers) for v2.x, otherwise 4 layers for v1
+        depth = 2 if model_version in ['v2.1', 'v2.2'] else 4
+        self.blocks = vit.blocks[:depth]
+        self.norm = vit.norm
 
-        # CUSTOM: patch embedding (8 spike channels → 192 dim)
-        # Replaces vit.patch_embed which expects 3-channel 16x16 RGB patches
-        self.patch_embed = nn.Linear(in_channels, embed_dim)
+        # Choose patch embedding strategy based on version
+        if model_version in ['v2.1', 'v2.2']:
+            self.patch_embed = MultiScalePatchEmbed(in_channels, embed_dim)
+        else:
+            self.patch_embed = nn.Linear(in_channels, embed_dim)
 
-        # CUSTOM: positional embeddings for 400 patches (20x20 grid)
-        # Replaces vit.pos_embed which is sized for 196 patches (14x14)
-        self.pos_embed = nn.Parameter(
-            torch.randn(1, grid_size * grid_size, embed_dim) * 0.02
-        )
+        self.pos_embed = nn.Parameter(torch.randn(1, grid_size * grid_size, embed_dim) * 0.02)
 
-        # CUSTOM: decode transformer output back to spatial heatmaps
-        # Replaces vit.head which is FC → 1000 ImageNet classes
-        self.to_spatial = nn.Sequential(
-            nn.Linear(embed_dim, 64),
-            nn.GELU(),
-        )
+        # Dimension reduction
+        self.to_spatial = nn.Sequential(nn.Linear(embed_dim, 64), nn.GELU())
 
+        # FPN-light Fusion block (Only initialized for v2.2)
+        if model_version == 'v2.2':
+            # 64 channels from ViT + 8 channels from spk2 = 72 input channels
+            self.fpn_fusion = nn.Sequential(
+                nn.Conv2d(64 + 8, 64, kernel_size=3, padding=1),
+                nn.BatchNorm2d(64),
+                nn.GELU()
+            )
+
+        # Decoder to upsample back to 64x64 heatmaps
         self.decoder = nn.Sequential(
-            # 20x20 → 40x40
-            nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2,
-                               padding=1, output_padding=1),
+            nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1),
             nn.GELU(),
-            # 40x40 → 80x80
-            nn.ConvTranspose2d(32, 16, kernel_size=3, stride=2,
-                               padding=1, output_padding=1),
+            nn.ConvTranspose2d(32, 16, kernel_size=3, stride=2, padding=1, output_padding=1),
             nn.GELU(),
-            # 80x80 → 80x80 (channel reduction to num_classes)
             nn.Conv2d(16, num_classes, kernel_size=3, padding=1),
-            # 80x80 → 64x64
-            nn.AdaptiveAvgPool2d(output_size),
+            # Guarantees exact 64x64 output regardless of intermediate dimensions
+            nn.AdaptiveAvgPool2d(output_size), 
         )
-
-        # Free the parts we don't need
         del vit
 
-    def forward(self, spk3):
-        """
-        Args:
-            spk3: [batch, 8, 20, 20] spike tensor from conv backbone
-
-        Returns:
-            heatmaps: [batch, 4, 64, 64] predicted heatmaps
-                      channel 0=person, 1=car, 2=bus, 3=truck
-        """
+    def forward(self, spk3, spk2=None):
         B, C, H, W = spk3.shape
 
-        # Flatten spatial positions into a sequence of patches
-        # [B, 8, 20, 20] → [B, 400, 8]
-        x = spk3.flatten(2).transpose(1, 2)
+        # Patch Embedding
+        if self.model_version in ['v2.1', 'v2.2']:
+            x = self.patch_embed(spk3)
+        else:
+            x = spk3.flatten(2).transpose(1, 2)
+            x = self.patch_embed(x)
 
-        # Project to transformer dimension + add positional info
-        # [B, 400, 8] → [B, 400, 192]
-        x = self.patch_embed(x) + self.pos_embed
-
-        # Run through pre-trained transformer blocks
-        # [B, 400, 192] → [B, 400, 192]
+        # Transformer Blocks
+        x = x + self.pos_embed
         x = self.blocks(x)
         x = self.norm(x)
 
-        # Project down and reshape back to spatial grid
-        # [B, 400, 192] → [B, 400, 64] → [B, 64, 20, 20]
+        # Reshape back to spatial dimensions (20x20)
         x = self.to_spatial(x)
         x = x.transpose(1, 2).reshape(B, 64, self.grid_size, self.grid_size)
 
-        # Upsample to output resolution
-        # [B, 64, 20, 20] → [B, 4, 64, 64]
+        # FPN-light: Fuse with higher-resolution spk2 features
+        if self.model_version == 'v2.2' and spk2 is not None:
+            # Upsample ViT output to match spk2 spatial dimensions
+            x_up = F.interpolate(x, size=spk2.shape[-2:], mode='bilinear', align_corners=False)
+            x_fused = torch.cat([x_up, spk2], dim=1)
+            x = self.fpn_fusion(x_fused)
+
+        # Final decoding to heatmaps
         x = self.decoder(x)
-
         return x
-
 
 # =============================================================================
 # HYBRID SNN + ViT MODEL
@@ -184,8 +199,9 @@ class SNNViT(nn.Module):
     Compare to original SNN with FC heads: ~15.5M params
     """
 
-    def __init__(self):
+    def __init__(self, model_version='v2.2'):
         super(SNNViT, self).__init__()
+        self.model_version = model_version
 
         # --- SNN Conv Backbone (unchanged from SNN_final_model.py) ---
         self.conv1 = nn.Conv2d(1, 8, kernel_size=7, stride=2, padding=0)
@@ -209,6 +225,7 @@ class SNNViT(nn.Module):
             grid_size=20,
             num_classes=4,
             output_size=64,
+            model_version=model_version
         )
 
     def forward(self, x, mem_states):
@@ -229,7 +246,7 @@ class SNNViT(nn.Module):
 
         # --- ViT head (replaces spk3_flat + 4 FC branches) ---
         # spk3: [batch, 8, 20, 20] → heatmaps: [batch, 4, 64, 64]
-        heatmaps = self.vit_head(spk3)
+        heatmaps = self.vit_head(spk3, spk2)
 
         person = heatmaps[:, 0]   # [batch, 64, 64]
         car = heatmaps[:, 1]      # [batch, 64, 64]
@@ -306,7 +323,7 @@ data_dirs = [
 # TRAINING FUNCTION
 # =============================================================================
 
-def start_training(training_data_dir, output_dir, num_epochs, phase, checkpoint_path, snn_backbone_path=None):
+def start_training(training_data_dir, output_dir, num_epochs, phase, checkpoint_path, snn_backbone_path=None, model_version="v2.2"):
 
     cur_time = datetime.datetime.now()
     output_dir = os.path.join(
@@ -314,7 +331,7 @@ def start_training(training_data_dir, output_dir, num_epochs, phase, checkpoint_
     )
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = SNNViT().to(device)
+    model = SNNViT(model_version=model_version).to(device)
 
     # INJECT PRE-TRAINED SNN BACKBONE
     if snn_backbone_path and os.path.exists(snn_backbone_path):
@@ -584,12 +601,12 @@ def start_training(training_data_dir, output_dir, num_epochs, phase, checkpoint_
                                 / (sequence_length - overlap)
                             )
                             buss_loss += (
-                                4 * 6
+                                10 # HARDCODED LOSS_WEIGHTS - "SOFT WEIGHTS" - may need to change in the future.
                                 * loss_fn(final_output3, targets[:, 2, step])
                                 / (sequence_length - overlap)
                             )
                             truck_loss += (
-                                4.2 * 6
+                                10 # HARDCODED LOSS_WEIGHTS - "SOFT WEIGHTS" - may need to change in the future.
                                 * loss_fn(final_output4, targets[:, 3, step])
                                 / (sequence_length - overlap)
                             )
@@ -677,10 +694,12 @@ parser.add_argument("--checkpoint", type=str, default=None,
                     help="Path to checkpoint .pth to resume from (for phase 2)")
 parser.add_argument("--snn_backbone", type=str, default=None,
                     help="Path to pre-trained SNN baseline .pth file")
+parser.add_argument("--version", type=str, default="v2.2", choices=["v1", "v2.1", "v2.2"],
+                    help="Architecture version: v1=Original, v2.1=MSPE+Diet, v2.2=MSPE+Diet+FPN")
 
 if __name__ == "__main__":
     args = parser.parse_args()
     torch.cuda.set_device(args.gpu)
 
     start_training(args.input_dir, args.output_dir, args.epoch,
-               args.phase, args.checkpoint, args.snn_backbone)
+               args.phase, args.checkpoint, args.snn_backbone, args.version)
