@@ -98,17 +98,33 @@ DEFAULTS = {
 # =============================================================================
 
 EXPERIMENTS = [
-    # -----------------------------------------------------------------
-    # SNN Baseline: Train the SNN backbone from scratch to get weights.
-    # (Already completed - Best val loss: 91.48)
-    # -----------------------------------------------------------------
-    # {
-    #     "name": "snn_baseline_weights",
-    #     "model": "snn",
-    #     "lr": 1e-4,
-    #     "epochs": 40,
-    #     "batch_size": 24,
-    # },
+    # STEG 1: SNN Baseline (Skapar ryggraden)
+    {
+        "name": "snn_baseline",
+        "model": "snn",
+        "epochs": 50,
+        "batch_size": 24,
+    },
+    # STEG 2: ViT Phase 1 (Fryser SNN, tränar bara adaptrar)
+    {
+        "name": "vit_phase1",
+        "model": "vit",
+        "phase": 1,
+        "epochs": 20,
+        "batch_size": 12,
+        # Laddar ryggraden från experimentet ovan
+        "snn_backbone": "../data/processed/experiments/snn_baseline/best_snn_model.pth",
+    },
+    # STEG 3: ViT Phase 2 (Full fine-tuning med låg LR på ViT-blocken)
+    {
+        "name": "vit_phase2",
+        "model": "vit",
+        "phase": 2,
+        "epochs": 40,
+        "batch_size": 12,
+        # Laddar hela modellen (SNN + Adaptrar) från Phase 1
+        "checkpoint": "../data/processed/experiments/vit_phase1/best_vit_model.pth",
+    }
 
     # -----------------------------------------------------------------
     # ViT Phase 1: Warmup adapters using the SNN baseline weights.
@@ -143,32 +159,32 @@ EXPERIMENTS = [
     # EXPERIMENT A: ViT Phase 2 with EQUAL Learning Rates.
     # Testing if the pre-trained ViT layers need a higher LR (1e-4) to adapt.
     # -----------------------------------------------------------------
-    {
-        "name": "vit_phase2_equal_lr",
-        "model": "vit",
-        "phase": 2,
-        "lr": 1e-4,
-        "lr_pretrained": 1e-4,  # Höjd från 1e-5
-        "epochs": 40,
-        "batch_size": 12,
-        "checkpoint": "../data/processed/experiments/vit_phase1_warmup/multiclass-adamw-14-121.7497.pth"
-    },
+    #{
+    #   "name": "vit_phase2_equal_lr",
+    #    "model": "vit",
+    #    "phase": 2,
+    #    "lr": 1e-4,
+    #    "lr_pretrained": 1e-4,  # Höjd från 1e-5
+    #    "epochs": 40,
+    #    "batch_size": 12,
+    #    "checkpoint": "../data/processed/experiments/vit_phase1_warmup/multiclass-adamw-14-121.7497.pth"
+    #},
 
     # -----------------------------------------------------------------
     # EXPERIMENT B: ViT Phase 2 with MORE Transformer Layers (6 layers).
     # Testing if a deeper ViT head captures better global context.
     # -----------------------------------------------------------------
-    {
-        "name": "vit_phase2_6_layers",
-        "model": "vit",
-        "phase": 2,
-        "vit_layers": 6,        # Höjd från 4 till 6
-        "lr": 1e-4,
-        "lr_pretrained": 1e-5,
-        "epochs": 40,
-        "batch_size": 12,
-        "checkpoint": "../data/processed/experiments/vit_phase1_warmup/multiclass-adamw-14-121.7497.pth"
-    },
+    #{
+    #    "name": "vit_phase2_6_layers",
+    #    "model": "vit",
+    #    "phase": 2,
+    #    "vit_layers": 6,        # Höjd från 4 till 6
+    #    "lr": 1e-4,
+    #    "lr_pretrained": 1e-5,
+    #    "epochs": 40,
+    #    "batch_size": 12,
+    #    "checkpoint": "../data/processed/experiments/vit_phase1_warmup/multiclass-adamw-14-121.7497.pth"
+    #},
 
     # -----------------------------------------------------------------
     # EXPERIMENT C: ViT Phase 2 with SOFTER Class Weights.
@@ -430,6 +446,7 @@ for epoch in range(num_epochs):
     with open(f"{{fn}}.json", "w") as f: json.dump(save_d, f)
     if is_best:
         torch.save(model.state_dict(), f"{{fn}}-{{epoch}}-{{vl:.4f}}.pth")
+        torch.save(model.state_dict(), os.path.join(output_dir, "best_vit_model.pth"))
         print(f"  Best model saved: {{fn}}-{{epoch}}-{{vl:.4f}}.pth")
 
 # Save final
@@ -631,6 +648,7 @@ for epoch in range(num_epochs):
     with open(f"{{fn}}.json", "w") as f: json.dump(save_d, f)
     if is_best:
         torch.save(model.state_dict(), f"{{fn}}-{{epoch}}-{{vl:.4f}}.pth")
+        torch.save(model.state_dict(), os.path.join(output_dir, "best_snn_model.pth")) # 
         print(f"  Best model saved: {{fn}}-{{epoch}}-{{vl:.4f}}.pth")
 
 fn = os.path.join(output_dir, "multiclass-adamw")
