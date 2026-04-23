@@ -1,5 +1,4 @@
-"""
-SNN + ViT Hybrid Model for Event-Based Vehicle Detection
+"""SNN + ViT Hybrid Model for Event-Based Traffic Detection
 DA150X - KTH Royal Institute of Technology
 Authors: Axel Prander & Viggo Jahr
 
@@ -7,23 +6,26 @@ This script replaces the FC classification heads in SNN_final_model.py
 with a pre-trained ViT-Tiny head from timm. The SNN conv backbone
 (conv1-conv3 + LIF neurons) is kept unchanged.
 
-Architecture:
-  Input: 200x200 event frame (binary)
-    → Conv backbone (3 conv + LIF layers) → spk3: [batch, 8, 20, 20]
-    → ViT head (pre-trained ViT-Tiny transformer blocks)
-    → 4 heatmaps: [batch, 4, 64, 64] (person, car, bus, truck)
+Supported Architectures:
+  - v1: ViT (4 layers) + Linear Patch Embedding
+  - v2: ViT (4 layers) + Multi-Scale Patch Embedding (MSPE)
+  - v3: ViT (2 layers) + Multi-Scale Patch Embedding (MSPE)
 
 Usage:
-  # Phase 1: frozen transformer, train adapters only
-  CUDA_VISIBLE_DEVICES=3 python3 SNN_ViT_model.py \
-      data/training_output_scaled/ data/model_output/vit/ \
+  Assuming you are running this script from the 'src/' directory.
+  The model reads training files from '../data/raw_scaled/' and 
+  saves all checkpoints and JSON stats to '../data/processed/experiments/'.
+
+  # Train version 1 (default) with frozen transformer (Phase 1)
+  CUDA_VISIBLE_DEVICES=3 python3 SNN_ViT_train.py \
+      ../data/raw_scaled/ ../data/processed/experiments/ \
       --gpu 0 --epoch 10 --phase 1
 
-  # Phase 2: unfreeze everything, fine-tune
-  CUDA_VISIBLE_DEVICES=3 python3 SNN_ViT_model.py \
-      data/training_output_scaled/ data/model_output/vit/ \
-      --gpu 0 --epoch 40 --phase 2 \
-      --checkpoint data/model_output/vit/<run_dir>/multiclass-adamw-<epoch>-<loss>.pth
+  # Fine-tune version 2 (Phase 2) from a previous checkpoint
+  CUDA_VISIBLE_DEVICES=3 python3 SNN_ViT_train.py \
+      ../data/raw_scaled/ ../data/processed/experiments/ \
+      --gpu 0 --epoch 40 --phase 2 --version v2 \
+      --checkpoint ../data/processed/experiments/<run_dir>/multiclass-adamw-<epoch>-<loss>.pth
 """
 
 import argparse
@@ -72,7 +74,7 @@ class MultiScalePatchEmbed(nn.Module):
     Replaces the standard linear projection with three parallel convolutions
     (1x1, 3x3, 5x5) to capture both fine details and larger structures before
     the Transformer processes the patches.
-    """
+    """ 
     def __init__(self, in_channels=8, embed_dim=192):
         super().__init__()
         # Divide the embedding dimension evenly across three scales
@@ -99,44 +101,33 @@ class MultiScalePatchEmbed(nn.Module):
 class ViTHeatmapHead(nn.Module):
     """
     Vision Transformer head that decodes SNN spiking features into heatmaps.
-    Supports ablation versions:
-      - v1: Standard ViT (4 layers, linear patch embed)
-      - v2.1: Diet-ViT (2 layers) + MSPE
-      - v2.2: Diet-ViT (2 layers) + MSPE + FPN-light (Skip connection from spk2)
+    Supports versions v1, v2, and v3 based on depth and patch embedding strategy.
+
     """
-    def __init__(self, in_channels=8, grid_size=20, num_classes=4, output_size=64, model_version='v2.2'):
+    def __init__(self, in_channels=8, grid_size=20, num_classes=4, output_size=64, version='v1'):
         super().__init__()
         self.grid_size = grid_size
         self.num_classes = num_classes
-        self.model_version = model_version
+        self.version = version
 
         vit = timm.create_model('vit_tiny_patch16_224', pretrained=True)
         embed_dim = vit.embed_dim  # 192
 
-        # Use 'Diet-ViT' (2 layers) for v2.x, otherwise 4 layers for v1
-        depth = 2 if model_version in ['v2.1', 'v2.2'] else 4
+        # Depth: 4 layers for v1 & v2. 2 layers for v3.
+        depth = 4 if version in ['v1', 'v2'] else 2
         self.blocks = vit.blocks[:depth]
         self.norm = vit.norm
 
-        # Choose patch embedding strategy based on version
-        if model_version in ['v2.1', 'v2.2']:
-            self.patch_embed = MultiScalePatchEmbed(in_channels, embed_dim)
-        else:
+        # Patch embedding: Linear for v1. Multi-Scale for v2 & v3.
+        if version == 'v1':
             self.patch_embed = nn.Linear(in_channels, embed_dim)
-
+        else:
+            self.patch_embed = MultiScalePatchEmbed(in_channels, embed_dim)
+        
         self.pos_embed = nn.Parameter(torch.randn(1, grid_size * grid_size, embed_dim) * 0.02)
 
         # Dimension reduction
         self.to_spatial = nn.Sequential(nn.Linear(embed_dim, 64), nn.GELU())
-
-        # FPN-light Fusion block (Only initialized for v2.2)
-        if model_version == 'v2.2':
-            # 64 channels from ViT + 8 channels from spk2 = 72 input channels
-            self.fpn_fusion = nn.Sequential(
-                nn.Conv2d(64 + 8, 64, kernel_size=3, padding=1),
-                nn.BatchNorm2d(64),
-                nn.GELU()
-            )
 
         # Decoder to upsample back to 64x64 heatmaps
         self.decoder = nn.Sequential(
@@ -150,16 +141,20 @@ class ViTHeatmapHead(nn.Module):
         )
         del vit
 
-    def forward(self, spk3, spk2=None):
+    def forward(self, spk3):
         B, C, H, W = spk3.shape
 
-        # Patch Embedding
-        if self.model_version in ['v2.1', 'v2.2']:
-            x = self.patch_embed(spk3)
-        else:
+        # --- Patch Embedding ---
+        # v1 uses nn.Linear which expects the channel dimension last: [Batch, Num_Patches, Channels].
+        # Therefore, we flatten the spatial dimensions (H, W) and transpose.
+        # v2/v3 use nn.Conv2d (inside MSPE), which expects the original spatial format: [Batch, Channels, H, W].
+        if self.version == 'v1':
             x = spk3.flatten(2).transpose(1, 2)
             x = self.patch_embed(x)
+        else:
+            x = self.patch_embed(spk3)
 
+        
         # Transformer Blocks
         x = x + self.pos_embed
         x = self.blocks(x)
@@ -168,13 +163,6 @@ class ViTHeatmapHead(nn.Module):
         # Reshape back to spatial dimensions (20x20)
         x = self.to_spatial(x)
         x = x.transpose(1, 2).reshape(B, 64, self.grid_size, self.grid_size)
-
-        # FPN-light: Fuse with higher-resolution spk2 features
-        if self.model_version == 'v2.2' and spk2 is not None:
-            # Upsample ViT output to match spk2 spatial dimensions
-            x_up = F.interpolate(x, size=spk2.shape[-2:], mode='bilinear', align_corners=False)
-            x_fused = torch.cat([x_up, spk2], dim=1)
-            x = self.fpn_fusion(x_fused)
 
         # Final decoding to heatmaps
         x = self.decoder(x)
@@ -186,22 +174,15 @@ class ViTHeatmapHead(nn.Module):
 
 class SNNViT(nn.Module):
     """
-    Hybrid SNN-ViT model for event-based vehicle detection.
+    Hybrid SNN-ViT model (v3) for event-based vehicle detection.
 
     The SNN conv backbone (conv1-conv3 with LIF neurons) is identical to
     SNN_final_model.py. The FC classification heads are replaced with a
     single ViT head that outputs all 4 class heatmaps at once.
-
-    Backbone: ~2.6K params (conv layers + batch norm)
-    ViT Head: ~5.7M params (pre-trained transformer + custom adapter)
-    Total:    ~5.7M params
-
-    Compare to original SNN with FC heads: ~15.5M params
     """
 
-    def __init__(self, model_version='v2.2'):
+    def __init__(self, version='v1'):
         super(SNNViT, self).__init__()
-        self.model_version = model_version
 
         # --- SNN Conv Backbone (unchanged from SNN_final_model.py) ---
         self.conv1 = nn.Conv2d(1, 8, kernel_size=7, stride=2, padding=0)
@@ -225,7 +206,7 @@ class SNNViT(nn.Module):
             grid_size=20,
             num_classes=4,
             output_size=64,
-            model_version=model_version
+            version=version
         )
 
     def forward(self, x, mem_states):
@@ -246,7 +227,7 @@ class SNNViT(nn.Module):
 
         # --- ViT head (replaces spk3_flat + 4 FC branches) ---
         # spk3: [batch, 8, 20, 20] → heatmaps: [batch, 4, 64, 64]
-        heatmaps = self.vit_head(spk3, spk2)
+        heatmaps = self.vit_head(spk3)
 
         person = heatmaps[:, 0]   # [batch, 64, 64]
         car = heatmaps[:, 1]      # [batch, 64, 64]
@@ -261,7 +242,7 @@ class SNNViT(nn.Module):
 # =============================================================================
 
 def save_data(model, output_dir, train_loss, validation_loss, val_accuracy,
-              tau, epoch, lr_list, save_model):
+              tau, epoch, lr_list, save_model, version):
     file_name = os.path.join(output_dir, "multiclass-adamw")
 
     if save_model:
@@ -274,7 +255,7 @@ def save_data(model, output_dir, train_loss, validation_loss, val_accuracy,
         "w_decay": w_decay,
         "lr": lr,
         "lr_pretrained": lr_pretrained,
-        "model": "SNN_ViT",
+        "model": f"SNN_ViT_{version}",
         "train_loss": train_loss,
         "validation_loss": validation_loss,
         "lr_schedule": lr_list,
@@ -323,7 +304,7 @@ data_dirs = [
 # TRAINING FUNCTION
 # =============================================================================
 
-def start_training(training_data_dir, output_dir, num_epochs, phase, checkpoint_path, snn_backbone_path=None, model_version="v2.2"):
+def start_training(training_data_dir, output_dir, num_epochs, phase, checkpoint_path, snn_backbone_path=None, version='v1'):
 
     cur_time = datetime.datetime.now()
     output_dir = os.path.join(
@@ -331,7 +312,7 @@ def start_training(training_data_dir, output_dir, num_epochs, phase, checkpoint_
     )
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = SNNViT(model_version=model_version).to(device)
+    model = SNNViT(version=version).to(device)
 
     # INJECT PRE-TRAINED SNN BACKBONE
     if snn_backbone_path and os.path.exists(snn_backbone_path):
@@ -661,16 +642,17 @@ def start_training(training_data_dir, output_dir, num_epochs, phase, checkpoint_
             best_val = total_val_loss / num_test_batches
 
         save_data(
-            model, output_dir, train_loss_list, val_loss_list,
-            val_acc_list, tau_mem, epoch, lr_list, is_best,
+            model, output_dir, train_loss_list, val_loss_list, val_acc_list, 
+            tau_mem, epoch, lr_list, 
+            is_best, version
         )
 
     # Save final model
     save_data(
-        model, output_dir, train_loss_list, val_loss_list,
-        val_acc_list, tau_mem, epoch, lr_list, True,
+        model, output_dir, train_loss_list, 
+        val_loss_list, val_acc_list, tau_mem, 
+        epoch, lr_list, True, version
     )
-
 
 # =============================================================================
 # CLI
@@ -680,9 +662,9 @@ parser = argparse.ArgumentParser(
     usage="%(prog)s <training_data/> <output_dir/> [options]",
 )
 parser.add_argument("input_dir",
-                    help="Path to training data (e.g. data/training_output_scaled/)")
+                    help="Path to training data (e.g. ../data/raw_scaled/)")
 parser.add_argument("output_dir",
-                    help="Path to save model checkpoints")
+                    help="Path to save model checkpoints (e.g. ../data/processed/experiments/)")
 parser.add_argument("--epoch", default=10, type=int,
                     help="Number of epochs (default: 10)")
 parser.add_argument("--gpu", type=int, default=0,
@@ -690,16 +672,15 @@ parser.add_argument("--gpu", type=int, default=0,
 parser.add_argument("--phase", type=int, default=0, choices=[0, 1, 2],
                     help="Training phase: 0=all layers same LR, "
                          "1=frozen transformer, 2=full fine-tune with dual LR")
+parser.add_argument("--version", type=str, default="v1", choices=["v1", "v2", "v3"],
+                    help="Architecture version: v1=ViT(4)+Linear, v2=ViT(4)+MSPE, v3=ViT(2)+MSPE (default: v1)")
 parser.add_argument("--checkpoint", type=str, default=None,
                     help="Path to checkpoint .pth to resume from (for phase 2)")
 parser.add_argument("--snn_backbone", type=str, default=None,
                     help="Path to pre-trained SNN baseline .pth file")
-parser.add_argument("--version", type=str, default="v2.2", choices=["v1", "v2.1", "v2.2"],
-                    help="Architecture version: v1=Original, v2.1=MSPE+Diet, v2.2=MSPE+Diet+FPN")
 
 if __name__ == "__main__":
     args = parser.parse_args()
     torch.cuda.set_device(args.gpu)
 
-    start_training(args.input_dir, args.output_dir, args.epoch,
-               args.phase, args.checkpoint, args.snn_backbone, args.version)
+    start_training(args.input_dir, args.output_dir, args.epoch, args.phase, args.checkpoint, args.snn_backbone, args.version)
