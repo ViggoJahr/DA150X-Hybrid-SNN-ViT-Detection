@@ -28,7 +28,7 @@ import matplotlib.pyplot as plt
 from norse.torch import LILinearCell
 from norse.torch.module.lif import LIFCell, LIFParameters
 
-from SNN_final_model import SNN
+from SNN_ViT_model_v2 import SNNViT
 
 try:
     from scipy.ndimage import maximum_filter
@@ -191,7 +191,7 @@ def evaluate(args):
     print(f"Checkpoint: {checkpoint_path}")
 
     # ── Load model ──
-    model = SNN()
+    model = SNNViT(model_version=args.version)
     model.load_state_dict(torch.load(checkpoint_path, map_location=device,
                                      weights_only=True))
     model = model.to(device)
@@ -248,7 +248,7 @@ def evaluate(args):
             targets_cropped.append(resized.squeeze(1))
 
         # Process sequences
-        mem_states = tuple([None] * 11)
+        mem_states = (None, None, None)
         seq_start = 0
 
         while seq_start + sequence_length <= n_frames:
@@ -391,6 +391,8 @@ def main():
     parser.add_argument("--checkpoint", default=None)
     parser.add_argument("--save_images", action="store_true")
     parser.add_argument("--image_every", type=int, default=200)
+    parser.add_argument("--version", type=str, default="v1",
+                    choices=["v1", "v2.1", "v2.2"])
     args = parser.parse_args()
     torch.cuda.set_device(args.gpu)
     evaluate(args)

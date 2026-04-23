@@ -601,12 +601,12 @@ def start_training(training_data_dir, output_dir, num_epochs, phase, checkpoint_
                                 / (sequence_length - overlap)
                             )
                             buss_loss += (
-                                10 # HARDCODED LOSS_WEIGHTS - "SOFT WEIGHTS" - may need to change in the future.
+                                4 * 6 
                                 * loss_fn(final_output3, targets[:, 2, step])
                                 / (sequence_length - overlap)
                             )
                             truck_loss += (
-                                10 # HARDCODED LOSS_WEIGHTS - "SOFT WEIGHTS" - may need to change in the future.
+                                4.2 * 6
                                 * loss_fn(final_output4, targets[:, 3, step])
                                 / (sequence_length - overlap)
                             )

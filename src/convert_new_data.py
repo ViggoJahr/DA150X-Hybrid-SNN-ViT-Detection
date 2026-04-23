@@ -74,13 +74,15 @@ def labels_to_heatmaps(label_dataset, num_frames=5400):
         entry = np.array(label_dataset[frame_idx], dtype=np.float32)
         if len(entry) == 0:
             continue
-        num_dets = len(entry) // 5
+        num_dets = len(entry) // 6
         if num_dets == 0:
             continue
-        dets = entry[:num_dets * 5].reshape(num_dets, 5)
+        dets = entry[:num_dets * 6].reshape(num_dets, 6)
         for det in dets:
             class_id = int(det[0])
-            cx, cy, w, h = det[1], det[2], det[3], det[4]
+            cx, cy, w, h, conf = det[1], det[2], det[3], det[4], det[5]
+            if conf < 0.7:
+                continue
             if class_id not in CLASS_TO_INDEX:
                 continue
             hmap_idx = CLASS_TO_INDEX[class_id]
