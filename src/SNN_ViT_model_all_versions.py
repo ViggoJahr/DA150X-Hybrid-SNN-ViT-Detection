@@ -308,7 +308,7 @@ def start_training(training_data_dir, output_dir, num_epochs, phase, checkpoint_
 
     cur_time = datetime.datetime.now()
     output_dir = os.path.join(
-        output_dir, f"vit-{cur_time.month}-{cur_time.day}-{cur_time.hour}-{cur_time.minute}"
+        output_dir, f"vit_{version}-{cur_time.month}-{cur_time.day}-{cur_time.hour}-{cur_time.minute}"
     )
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -640,6 +640,10 @@ def start_training(training_data_dir, output_dir, num_epochs, phase, checkpoint_
         is_best = total_val_loss / num_test_batches < best_val
         if is_best:
             best_val = total_val_loss / num_test_batches
+
+	    # Saves the best_result with a clear name so it's easy to find
+            best_model_path = os.path.join(output_dir, f"best_vit_model_{version}.pth")
+            torch.save(model.state_dict(), best_model_path)
 
         save_data(
             model, output_dir, train_loss_list, val_loss_list, val_acc_list, 
