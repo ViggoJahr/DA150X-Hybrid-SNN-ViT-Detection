@@ -98,96 +98,25 @@ DEFAULTS = {
 # =============================================================================
 
 EXPERIMENTS = [
-    # -----------------------------------------------------------------
-    # SNN Baseline: Train the SNN backbone from scratch to get weights.
-    # (Already completed - Best val loss: 91.48)
-    # -----------------------------------------------------------------
-    # {
-    #     "name": "snn_baseline_weights",
-    #     "model": "snn",
-    #     "lr": 1e-4,
-    #     "epochs": 40,
-    #     "batch_size": 24,
-    # },
-
-    # -----------------------------------------------------------------
-    # ViT Phase 1: Warmup adapters using the SNN baseline weights.
-    # (Already completed - Best val loss: 121.75)
-    # -----------------------------------------------------------------
-    # {
-    #     "name": "vit_phase1_warmup",
-    #     "model": "vit",
-    #     "phase": 1,
-    #     "lr": 1e-4,
-    #     "epochs": 15,
-    #     "batch_size": 12,
-    #     "snn_backbone": "../data/processed/experiments/snn_baseline_weights/multiclass-adamw-39-91.4787.pth"
-    # },
-
-    # -----------------------------------------------------------------
-    # ViT Phase 2 (Standard): Full fine-tuning with baseline values.
-    # (Already completed - Best val loss: ~94)
-    # -----------------------------------------------------------------
-    # {
-    #     "name": "vit_phase2_finetune",
-    #     "model": "vit",
-    #     "phase": 2,
-    #     "lr": 1e-4,
-    #     "lr_pretrained": 1e-5, 
-    #     "epochs": 40,          
-    #     "batch_size": 12,
-    #     "checkpoint": "../data/processed/experiments/vit_phase1_warmup/multiclass-adamw-14-121.7497.pth"
-    # },
-
-    # -----------------------------------------------------------------
-    # EXPERIMENT A: ViT Phase 2 with EQUAL Learning Rates.
-    # Testing if the pre-trained ViT layers need a higher LR (1e-4) to adapt.
-    # -----------------------------------------------------------------
+    # ─── STEP 3a: v2.1 Diet-ViT+MSPE Phase 1 (freeze SNN + ViT blocks) ───
     {
-        "name": "vit_phase2_equal_lr",
-        "model": "vit",
-        "phase": 2,
-        "lr": 1e-4,
-        "lr_pretrained": 1e-4,  # Höjd från 1e-5
-        "epochs": 40,
+        "name": "v2_phase1_clean",
+        "model": "vit_v2",
+        "phase": 1,
+        "epochs": 20,
         "batch_size": 12,
-        "checkpoint": "../data/processed/experiments/vit_phase1_warmup/multiclass-adamw-14-121.7497.pth"
+        "snn_backbone": "../data/processed/experiments/snn_baseline_clean/best_snn_model.pth",
     },
 
-    # -----------------------------------------------------------------
-    # EXPERIMENT B: ViT Phase 2 with MORE Transformer Layers (6 layers).
-    # Testing if a deeper ViT head captures better global context.
-    # -----------------------------------------------------------------
+    # ─── STEP 3b: v2.1 Diet-ViT+MSPE Phase 2 (unfreeze all, dual LR) ───
     {
-        "name": "vit_phase2_6_layers",
-        "model": "vit",
+        "name": "v2_phase2_clean",
+        "model": "vit_v2",
         "phase": 2,
-        "vit_layers": 6,        # Höjd från 4 till 6
-        "lr": 1e-4,
-        "lr_pretrained": 1e-5,
         "epochs": 40,
         "batch_size": 12,
-        "checkpoint": "../data/processed/experiments/vit_phase1_warmup/multiclass-adamw-14-121.7497.pth"
+        "checkpoint": "../data/processed/experiments/v2_phase1_clean/best_vit_model.pth",
     },
-
-    # -----------------------------------------------------------------
-    # EXPERIMENT C: ViT Phase 2 with SOFTER Class Weights.
-    # Testing if massive penalties on buses/trucks disrupt ViT attention.
-    # -----------------------------------------------------------------
-    {
-        "name": "vit_phase2_softer_weights",
-        "model": "vit",
-        "phase": 2,
-        "lr": 1e-4,
-        "lr_pretrained": 1e-5,
-        "epochs": 40,
-        "batch_size": 12,
-        "person_weight": 2.0,   # Justerad
-        "car_weight": 1.0,      # Justerad
-        "bus_weight": 10.0,     # Sänkt från 24.0
-        "truck_weight": 10.0,   # Sänkt från 25.2
-        "checkpoint": "../data/processed/experiments/vit_phase1_warmup/multiclass-adamw-14-121.7497.pth"
-    }
 ]
 
 # =============================================================================
@@ -430,9 +359,268 @@ for epoch in range(num_epochs):
     with open(f"{{fn}}.json", "w") as f: json.dump(save_d, f)
     if is_best:
         torch.save(model.state_dict(), f"{{fn}}-{{epoch}}-{{vl:.4f}}.pth")
+        torch.save(model.state_dict(), os.path.join(output_dir, "best_vit_model.pth"))
         print(f"  Best model saved: {{fn}}-{{epoch}}-{{vl:.4f}}.pth")
 
 # Save final
+fn = os.path.join(output_dir, "multiclass-adamw")
+torch.save(model.state_dict(), f"{{fn}}-{{epoch}}-{{vl:.4f}}.pth")
+print(f"\\nTraining complete. Best val_loss: {{best_val:.4f}}")
+'''
+    with open(script_path, 'w') as f:
+        f.write(script)
+
+
+
+def generate_vit_v2_script(config, script_path):
+    """Generate a Diet-ViT + MSPE (v2.1) training script."""
+    script = f'''#!/usr/bin/env python3
+"""Auto-generated by run_experiments.py — {config["name"]} (v2.1 Diet-ViT+MSPE)"""
+import argparse, datetime, os, random, time, gc, json
+from pathlib import Path
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as torchF
+import torchvision.transforms.functional as TF
+from data_loading import get_data
+from norse.torch import LILinearCell
+from norse.torch.module.lif import LIFCell, LIFParameters
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+import timm
+
+sequence_length = {config["sequence_length"]}
+overlap = {config["overlap"]}
+batch_size = {config["batch_size"]}
+w_decay = {config["w_decay"]}
+lr = {config["lr"]}
+lr_pretrained = {config["lr_pretrained"]}
+tau_mem = {config["tau_mem"]}
+loss_function = nn.MSELoss()
+GRAD_CLIP = {config["grad_clip"]}
+SCHEDULER_PATIENCE = {config["scheduler_patience"]}
+PERSON_W = {config["person_weight"]}
+CAR_W = {config["car_weight"]}
+BUS_W = {config["bus_weight"]}
+TRUCK_W = {config["truck_weight"]}
+DROPOUT1 = {config["dropout1"]}
+DROPOUT2 = {config["dropout2"]}
+
+class MultiScalePatchEmbed(nn.Module):
+    def __init__(self, in_channels=8, embed_dim=192):
+        super().__init__()
+        out_dim = embed_dim // 3
+        self.conv_small = nn.Conv2d(in_channels, out_dim, kernel_size=1, padding=0)
+        self.conv_mid   = nn.Conv2d(in_channels, out_dim, kernel_size=3, padding=1)
+        self.conv_large = nn.Conv2d(in_channels, out_dim, kernel_size=5, padding=2)
+
+    def forward(self, x):
+        x_multi = torch.cat([self.conv_small(x), self.conv_mid(x), self.conv_large(x)], dim=1)
+        return x_multi.flatten(2).transpose(1, 2)
+
+class ViTHeatmapHead(nn.Module):
+    def __init__(self, in_channels=8, grid_size=20, num_classes=4, output_size=64):
+        super().__init__()
+        self.grid_size = grid_size
+        vit = timm.create_model("vit_tiny_patch16_224", pretrained=True)
+        embed_dim = vit.embed_dim
+        self.blocks = vit.blocks[:2]  # Diet-ViT: only 2 layers
+        self.norm = vit.norm
+        self.patch_embed = MultiScalePatchEmbed(in_channels, embed_dim)
+        self.pos_embed = nn.Parameter(torch.randn(1, grid_size*grid_size, embed_dim) * 0.02)
+        self.to_spatial = nn.Sequential(nn.Linear(embed_dim, 64), nn.GELU())
+        self.decoder = nn.Sequential(
+            nn.ConvTranspose2d(64, 32, 3, stride=2, padding=1, output_padding=1), nn.GELU(),
+            nn.ConvTranspose2d(32, 16, 3, stride=2, padding=1, output_padding=1), nn.GELU(),
+            nn.Conv2d(16, num_classes, 3, padding=1),
+            nn.AdaptiveAvgPool2d(output_size),
+        )
+        del vit
+
+    def forward(self, spk3):
+        B, C, H, W = spk3.shape
+        x = self.patch_embed(spk3)
+        x = x + self.pos_embed
+        x = self.blocks(x)
+        x = self.norm(x)
+        x = self.to_spatial(x)
+        x = x.transpose(1, 2).reshape(B, 64, self.grid_size, self.grid_size)
+        return self.decoder(x)
+
+class SNNViT(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv1 = nn.Conv2d(1, 8, kernel_size=7, stride=2, padding=0)
+        self.bn1 = nn.BatchNorm2d(8)
+        self.lif1 = LIFCell(p=LIFParameters(tau_mem_inv=tau_mem))
+        self.conv2 = nn.Conv2d(8, 8, kernel_size=5, stride=2, padding=0)
+        self.bn2 = nn.BatchNorm2d(8)
+        self.lif2 = LIFCell(p=LIFParameters(tau_mem_inv=tau_mem))
+        self.conv3 = nn.Conv2d(8, 8, kernel_size=3, stride=1, padding=0)
+        self.bn3 = nn.BatchNorm2d(8)
+        self.lif3 = LIFCell(p=LIFParameters(tau_mem_inv=tau_mem))
+        self.maxpool = nn.MaxPool2d(2, 2)
+        self.dropout1 = nn.Dropout(p=DROPOUT1)
+        self.vit_head = ViTHeatmapHead(in_channels=8, grid_size=20, num_classes=4, output_size=64)
+
+    def forward(self, x, mem_states):
+        bs, C, W, H = x.shape
+        x = (x != 0).float()
+        mem1, mem2, mem3 = mem_states
+        v1 = self.bn1(self.conv1(x))
+        spk1, mem1 = self.lif1(v1, mem1)
+        v2 = self.dropout1(self.bn2(self.conv2(self.maxpool(spk1))))
+        spk2, mem2 = self.lif2(v2, mem2)
+        v3 = self.dropout1(self.bn3(self.conv3(spk2)))
+        spk3, mem3 = self.lif3(v3, mem3)
+        heatmaps = self.vit_head(spk3)
+        return heatmaps[:, 0], heatmaps[:, 1], heatmaps[:, 2], heatmaps[:, 3], (mem1, mem2, mem3)
+
+def loss_fn(output, target, step, cid):
+    return loss_function(output, target * 1000)
+
+data_dirs = ["week_32-box_3","week_33-box_2","week_34-box_1","week_35-box_2","week_36-box_3"]
+
+def chunker(seq, size):
+    return (seq[pos:pos+size] for pos in range(0, len(seq), size))
+
+def pretty_time(s):
+    if not s: return "0s"
+    s = int(s)
+    h, s = divmod(s, 3600)
+    m, s = divmod(s, 60)
+    return " ".join([f"{{c}}{{u}}" for c, u in [(h,"h"),(m,"m"),(s,"s")] if c])
+
+training_data_dir = "{config["data_dir"]}"
+output_dir = "{config["_output_dir"]}"
+num_epochs = {config["epochs"]}
+checkpoint_path = {repr(config["checkpoint"])}
+snn_backbone_path = {repr(config["snn_backbone"])}
+
+Path(output_dir).mkdir(parents=True, exist_ok=True)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = SNNViT().to(device)
+
+if checkpoint_path:
+    print(f"Loading checkpoint: {{checkpoint_path}}")
+    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+
+if snn_backbone_path and os.path.exists(snn_backbone_path):
+    print(f"Loading pre-trained SNN backbone from: {{snn_backbone_path}}")
+    old_state_dict = torch.load(snn_backbone_path, map_location=device)
+    pretrained_dict = {{k: v for k, v in old_state_dict.items() if "conv" in k or "bn" in k}}
+    model_dict = model.state_dict()
+    model_dict.update(pretrained_dict)
+    model.load_state_dict(model_dict)
+    print(f"Successfully injected {{len(pretrained_dict)}} pre-trained SNN layers.")
+
+PHASE = {config["phase"]}
+
+if PHASE == 1:
+    for p in model.vit_head.blocks.parameters(): p.requires_grad = False
+    for p in model.vit_head.norm.parameters(): p.requires_grad = False
+    for name, param in model.named_parameters():
+        if "conv" in name or "bn" in name:
+            param.requires_grad = False
+    optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, weight_decay=w_decay, eps=1e-8)
+elif PHASE == 2:
+    pretrained_p, new_p = [], []
+    for n, p in model.named_parameters():
+        (pretrained_p if "vit_head.blocks" in n or "vit_head.norm" in n else new_p).append(p)
+    optimizer = torch.optim.AdamW([{{"params": new_p, "lr": lr}}, {{"params": pretrained_p, "lr": lr_pretrained}}], weight_decay=w_decay, eps=1e-8)
+else:
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=w_decay, eps=1e-8)
+
+scheduler = ReduceLROnPlateau(optimizer, "min", patience=SCHEDULER_PATIENCE, factor=0.5)
+total_p = sum(p.numel() for p in model.parameters())
+train_p = sum(p.numel() for p in model.parameters() if p.requires_grad)
+print(f"Model: Diet-ViT+MSPE (v2.1) | Params: {{total_p:,}} total, {{train_p:,}} trainable | Phase {{PHASE}}")
+print(f"LR: {{lr}} | LR_pretrained: {{lr_pretrained}} | ViT layers: 2 | Batch: {{batch_size}}")
+print(f"Class weights: person={{PERSON_W}} car={{CAR_W}} bus={{BUS_W}} truck={{TRUCK_W}}")
+print("=" * 60)
+
+data_files = []
+for d in data_dirs:
+    dp = os.path.join(training_data_dir, d)
+    if os.path.exists(dp):
+        data_files.extend([os.path.join(dp, f) for f in os.listdir(dp) if f.endswith(".pt")])
+print(f"Found {{len(data_files)}} training files")
+random.shuffle(data_files)
+
+train_loss_list, val_loss_list, lr_list, val_acc_list = [], [], [], []
+best_val = 999999
+
+for epoch in range(num_epochs):
+    total_tl, p_tl, c_tl, b_tl, t_tl, n_tb = 0,0,0,0,0,0
+    model.train()
+    start = time.time()
+    for i, dp in enumerate(chunker(data_files, 4)):
+        data = get_data(dp)
+        if data is not None:
+            for _, (frames, targets) in enumerate(data[0]):
+                mem = (None, None, None)
+                optimizer.zero_grad()
+                frames, targets = frames.to(device), targets.to(device)
+                pl, cl, bl, tl = 0,0,0,0
+                for step in range(sequence_length):
+                    o1,o2,o3,o4, mem = model(frames[:,step].unsqueeze(1), mem)
+                    if step >= overlap:
+                        pl += PERSON_W * loss_fn(o1.view(-1,64,64), targets[:,0,step], step, 0) / (sequence_length - overlap)
+                        cl += CAR_W * loss_fn(o2.view(-1,64,64), targets[:,1,step], step, 2) / (sequence_length - overlap)
+                        bl += BUS_W * loss_fn(o3.view(-1,64,64), targets[:,2,step], step, 5) / (sequence_length - overlap)
+                        tl += TRUCK_W * loss_fn(o4.view(-1,64,64), targets[:,3,step], step, 7) / (sequence_length - overlap)
+                loss = pl + cl + bl + tl
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP)
+                optimizer.step()
+                total_tl += loss.item(); p_tl += pl.item(); c_tl += cl.item(); b_tl += bl.item(); t_tl += tl.item()
+                n_tb += 1
+
+    total_vl, p_vl, c_vl, b_vl, t_vl, n_vb = 0,0,0,0,0,0
+    model.eval()
+    with torch.no_grad():
+        for i, dp in enumerate(chunker(data_files, 4)):
+            data = get_data(dp)
+            if data is not None:
+                for _, (frames, targets) in enumerate(data[1]):
+                    mem = (None, None, None)
+                    frames, targets = frames.to(device), targets.to(device)
+                    pl, cl, bl, tl = 0,0,0,0
+                    for step in range(sequence_length):
+                        o1,o2,o3,o4, mem = model(frames[:,step].unsqueeze(1), mem)
+                        pl += PERSON_W * loss_fn(o1.view(-1,64,64), targets[:,0,step], step, 0) / (sequence_length - overlap)
+                        cl += CAR_W * loss_fn(o2.view(-1,64,64), targets[:,1,step], step, 2) / (sequence_length - overlap)
+                        bl += BUS_W * loss_fn(o3.view(-1,64,64), targets[:,2,step], step, 5) / (sequence_length - overlap)
+                        tl += TRUCK_W * loss_fn(o4.view(-1,64,64), targets[:,3,step], step, 7) / (sequence_length - overlap)
+                    loss = pl + cl + bl + tl
+                    total_vl += loss.item(); p_vl += pl.item(); c_vl += cl.item(); b_vl += bl.item(); t_vl += tl.item()
+                    n_vb += 1
+
+    scheduler.step(total_vl / n_vb)
+    del data; gc.collect()
+    et = time.time() - start
+    vl = total_vl/n_vb
+    print(f"Epoch {{epoch+1}} | train: {{total_tl/n_tb:.3f}} | val: {{vl:.3f}} | person {{p_vl/n_vb:.3f}} | car {{c_vl/n_vb:.3f}} | bus {{b_vl/n_vb:.3f}} | truck {{t_vl/n_vb:.3f}} | {{pretty_time(et)}}")
+
+    train_loss_list.append([round(total_tl/n_tb,4), round(p_tl/n_tb,4), round(c_tl/n_tb,4), round(b_tl/n_tb,4), round(t_tl/n_tb,4)])
+    val_loss_list.append([round(vl,4), round(p_vl/n_vb,4), round(c_vl/n_vb,4), round(b_vl/n_vb,4), round(t_vl/n_vb,4)])
+    lr_list.append(scheduler.get_last_lr())
+    val_acc_list.append(0)
+
+    fn = os.path.join(output_dir, "multiclass-adamw")
+    is_best = vl < best_val
+    if is_best: best_val = vl
+    save_d = {{"Epoch": epoch, "Tau": tau_mem, "w_decay": w_decay, "lr": lr, "model": "Diet_ViT_MSPE",
+              "vit_layers": 2, "phase": PHASE, "batch_size": batch_size,
+              "class_weights": {{"person": PERSON_W, "car": CAR_W, "bus": BUS_W, "truck": TRUCK_W}},
+              "train_loss": train_loss_list, "validation_loss": val_loss_list, "lr_schedule": lr_list,
+              "validation_accuracy": val_acc_list}}
+    with open(f"{{fn}}.json", "w") as f: json.dump(save_d, f)
+    if is_best:
+        torch.save(model.state_dict(), f"{{fn}}-{{epoch}}-{{vl:.4f}}.pth")
+        torch.save(model.state_dict(), os.path.join(output_dir, "best_vit_model.pth"))
+        print(f"  Best model saved: {{fn}}-{{epoch}}-{{vl:.4f}}.pth")
+
 fn = os.path.join(output_dir, "multiclass-adamw")
 torch.save(model.state_dict(), f"{{fn}}-{{epoch}}-{{vl:.4f}}.pth")
 print(f"\\nTraining complete. Best val_loss: {{best_val:.4f}}")
@@ -631,6 +819,7 @@ for epoch in range(num_epochs):
     with open(f"{{fn}}.json", "w") as f: json.dump(save_d, f)
     if is_best:
         torch.save(model.state_dict(), f"{{fn}}-{{epoch}}-{{vl:.4f}}.pth")
+        torch.save(model.state_dict(), os.path.join(output_dir, "best_snn_model.pth")) # 
         print(f"  Best model saved: {{fn}}-{{epoch}}-{{vl:.4f}}.pth")
 
 fn = os.path.join(output_dir, "multiclass-adamw")
@@ -684,6 +873,8 @@ def run_experiments(gpu_id):
 
         if config["model"] == "vit":
             generate_vit_script(config, script_path)
+        elif config["model"] == "vit_v2":
+            generate_vit_v2_script(config, script_path)
         else:
             generate_snn_script(config, script_path)
 
