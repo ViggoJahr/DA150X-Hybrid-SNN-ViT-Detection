@@ -223,12 +223,7 @@ for layer_nr in nr_par_last_layer_list:
 
         # if print_image:
         #     save_current_result(output_frame, target_frame, frames, step)
-    data_dirs = [
-        "week_32-box_3",
-        "week_33-box_2",
-        "week_34-box_1",
-        "week_35-box_2",
-        "week_36-box_3" ]
+    data_dirs = ["week_32-box_3",]
 
     # [
     #     "w33-1-08-14",
@@ -348,10 +343,10 @@ for layer_nr in nr_par_last_layer_list:
                             # print(output.shape)
 
                             if step >= overlap:
-                                final_output1 = output1.view(batch_size, 64, 64)
-                                final_output2 = output2.view(batch_size, 64, 64)
-                                final_output3 = output3.view(batch_size, 64, 64)
-                                final_output4 = output4.view(batch_size, 64, 64)
+                                final_output1 = output1.view(-1, 64, 64)
+                                final_output2 = output2.view(-1, 64, 64)
+                                final_output3 = output3.view(-1, 64, 64)
+                                final_output4 = output4.view(-1, 64, 64)
 
                                 # print(targets.shape)
 
@@ -447,10 +442,10 @@ for layer_nr in nr_par_last_layer_list:
                                     input_frame, mem_states
                                 )
 
-                                final_output1 = output1.view(batch_size, 64, 64)
-                                final_output2 = output2.view(batch_size, 64, 64)
-                                final_output3 = output3.view(batch_size, 64, 64)
-                                final_output4 = output4.view(batch_size, 64, 64)
+                                final_output1 = output1.view(-1, 64, 64)
+                                final_output2 = output2.view(-1, 64, 64)
+                                final_output3 = output3.view(-1, 64, 64)
+                                final_output4 = output4.view(-1, 64, 64)
 
                                 person_loss += (
                                     0.7
