@@ -25,5 +25,6 @@ data/output_clips/
 runs/
 output.log
 data_preprocessing/build/
+src/visualize/visualizations
 *.so
 *.o
