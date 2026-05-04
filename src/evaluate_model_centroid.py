@@ -152,6 +152,9 @@ def evaluate(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 
+    eval_output_dir = os.path.join(args.model_dir, "evaluation_centroid")
+    os.makedirs(eval_output_dir, exist_ok=True)
+
     # 1. Initialize Architecture
     checkpoint_path = args.checkpoint or find_best_checkpoint(args.model_dir)
     if not checkpoint_path:
