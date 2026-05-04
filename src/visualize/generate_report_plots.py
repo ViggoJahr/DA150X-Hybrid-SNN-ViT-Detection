@@ -8,8 +8,16 @@ import numpy as np
 # ==========================================
 # Set style for academic reporting
 plt.style.use('seaborn-v0_8-whitegrid')
-plt.rcParams.update({'font.size': 12, 'figure.dpi': 300})
-
+plt.rcParams.update({
+    'font.size': 16,            # General text
+    'axes.titlesize': 20,       # Subplot titles
+    'axes.labelsize': 18,       # X and Y axis labels
+    'xtick.labelsize': 14,      # X axis tick numbers
+    'ytick.labelsize': 14,      # Y axis tick numbers
+    'legend.fontsize': 14,      # Legend text
+    'figure.titlesize': 24,     # Main suptitle
+    'figure.dpi': 300           # High resolution
+})
 OUTPUT_DIR = "visualizations"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -31,7 +39,7 @@ EXPERIMENTS = {
         "style": "-"
     },
     "../../data/processed/experiments/v3_phase2_clean/training.log": {
-        "name": "v3 (Diet-MSPE, 2L)",
+        "name": "v3 (MSPE, 2L)",
         "color": "#27ae60",
         "style": "-"
     }
@@ -90,22 +98,22 @@ if not parsed_data:
 # ==========================================
 # PLOT 1: All Validation Curves (Combined)
 # ==========================================
-plt.figure(figsize=(10, 6))
+plt.figure(figsize=(12, 8))
 for name, info in parsed_data.items():
     epochs = range(1, len(info["val_curve"]) + 1)
     plt.plot(epochs, info["val_curve"], 
              label=name, color=info["color"], linestyle=info["style"], 
-             linewidth=2.5 if name != "Baseline" else 2)
+             linewidth=3 if name != "Baseline" else 2.5)
 
 if "Baseline" in parsed_data:
     baseline_best = parsed_data["Baseline"]["best_loss"]
     plt.axhline(y=baseline_best, color=parsed_data["Baseline"]["color"], 
-                linestyle=':', alpha=0.6, label=f"Baseline Best ({baseline_best:.1f})")
+                linestyle=':', alpha=1, label=f"Baseline Best ({baseline_best:.1f})")
 
-plt.title("Validation Loss Convergence (Phase 2)", fontweight='bold')
-plt.xlabel("Epoch")
-plt.ylabel("MSE Loss")
-plt.legend()
+plt.title("Validation Loss Convergence", fontweight='bold', pad=10)
+plt.xlabel("Epoch", labelpad=7)
+plt.ylabel("MSE Loss", labelpad=7)
+plt.legend(frameon=True, shadow=True)
 plt.tight_layout()
 plt.savefig(os.path.join(OUTPUT_DIR, "1_convergence_all_val.png"))
 plt.close()
@@ -115,7 +123,7 @@ print(f"Generated -> 1_convergence_all_val.png")
 # PLOT 2: Train vs Validation (2x2 Grid)
 # ==========================================
 # Create a 2x2 grid of subplots
-fig, axs = plt.subplots(2, 2, figsize=(14, 10))
+fig, axs = plt.subplots(2, 2, figsize=(16, 12))
 axs = axs.flatten() # Flatten to loop over them easily
 
 for i, (name, info) in enumerate(parsed_data.items()):
@@ -124,19 +132,18 @@ for i, (name, info) in enumerate(parsed_data.items()):
     
     # Plot Training Loss
     ax.plot(epochs, info["train_curve"], 
-            label='Train Loss', color='gray', linestyle='--', linewidth=2)
+            label='Train Loss', color='gray', linestyle='--', linewidth=2.5)
     # Plot Validation Loss
     ax.plot(epochs, info["val_curve"], 
-            label='Val Loss', color=info["color"], linewidth=2.5)
+            label='Val Loss', color=info["color"], linewidth=3)
     
     # Formatting the subplot
-    ax.set_title(f"{name} (Best Val: {info['best_loss']:.1f})", fontweight='bold')
+    ax.set_title(f"{name} (Best Val: {info['best_loss']:.1f})", fontweight='bold', pad=10)
     ax.set_xlabel("Epoch")
     ax.set_ylabel("MSE Loss")
-    ax.legend(loc='upper right')
-    ax.grid(True, linestyle=':', alpha=0.7)
+    ax.legend(loc='upper right', frameon=True)
+    ax.grid(True, linestyle=':', alpha=1)
 
-plt.suptitle("Training vs. Validation Loss by Architecture", fontweight='bold', fontsize=16)
 plt.tight_layout()
 # Adjust top to make room for suptitle
 plt.subplots_adjust(top=0.92) 
